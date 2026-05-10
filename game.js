@@ -146,6 +146,29 @@
   let titleClickFlashX = W/2;
   let titleClickFlashY = H/2;
 
+  const ONLINE_DURATIONS = [120, 180, 240, 300];
+  const ONLINE_BGM_OPTIONS = [
+    { key: "titleBgm", label: "시작화면 BGM" },
+    { key: "selectBgm", label: "캐릭터 선택 BGM" },
+    { key: "stage1", label: "스테이지 1 BGM" },
+    { key: "stage2", label: "스테이지 2 BGM" },
+    { key: "stage3", label: "스테이지 3 BGM" },
+    { key: "stage4", label: "스테이지 4 BGM" },
+    { key: "stage5", label: "스테이지 5 BGM" },
+  ];
+  let onlineDuration = 180;
+  let onlineBgmKey = "stage1";
+  let onlineLocalReady = false;
+  let onlineRemoteReady = false;
+  let onlineNotice = "";
+  let onlineCountdownEnd = 0;
+  let onlineLobbyButtons = [];
+  let localPlayerName = "";
+  let nameEditActive = false;
+  let chatEditActive = false;
+  let chatInput = "";
+  let chatMessages = [];
+
 
   function keyLabel(key) {
     if (key === " ") return "SPACE";
@@ -258,8 +281,9 @@
   function switchBgmForState() {
     if (!audioUnlocked) return;
     if (state === "title") playBgm("titleBgm");
-    else if (state === "select" || state === "mode" || state === "connected") playBgm("selectBgm");
-    else if (state === "playing") playBgm(`stage${stageIndex + 1}`);
+    else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
+    else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
+    else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${stageIndex + 1}`);
     else stopBgm();
   }
 
@@ -513,7 +537,7 @@
     menuButton("help", 365, 560, 150, 50, "게임 설명");
     menuButton("fullscreen", 550, 560, 180, 50, "전체화면(F11)");
     menuButton("resume", 765, 560, 150, 50, "계속하기");
-    menuButton("title", 950, 560, 155, 50, "초기화면");
+    menuButton("title", 950, 560, 155, 50, (gameMode === "online" && connected) ? "온라인 로비" : "초기화면");
   }
 
   function drawVolumeBar(x, y, w, h, ratio, color) {
@@ -651,6 +675,271 @@
     }
   }
 
+  function sanitizePlayerName(name) {
+    let v = String(name || "").replace(/\s+/g, " ").trim();
+    if (!v) v = chars[selectedChar].name;
+    const hasWide = /[^\x00-\x7F]/.test(v);
+    const max = hasWide ? 12 : 18;
+    return Array.from(v).slice(0, max).join("");
+  }
+
+  function getLocalName() {
+    return sanitizePlayerName(localPlayerName || chars[selectedChar].name);
+  }
+
+  function ensureOnlinePlayers() {
+    localPlayerName = getLocalName();
+    if (!local) local = defaultPlayer(selectedChar, "left", localPlayerName);
+    local.char = selectedChar;
+    local.name = localPlayerName;
+    if (!remote) remote = defaultPlayer(1 - selectedChar, "right", "상대");
+  }
+
+  function onlineBgmLabel() {
+    const item = ONLINE_BGM_OPTIONS.find(o => o.key === onlineBgmKey) || ONLINE_BGM_OPTIONS[2];
+    return item.label;
+  }
+
+  function setOnlineReady(v, broadcast=true) {
+    onlineLocalReady = !!v;
+    if (local) local.name = getLocalName();
+    if (broadcast) sendMsg({ type: "lobby_state", name: getLocalName(), char: selectedChar, ready: onlineLocalReady, duration: onlineDuration, bgm: onlineBgmKey });
+    maybeStartOnlineCountdown();
+  }
+
+  function broadcastLobbyState() {
+    sendMsg({ type: "lobby_state", name: getLocalName(), char: selectedChar, ready: onlineLocalReady, duration: onlineDuration, bgm: onlineBgmKey });
+  }
+
+  function pushChat(who, text, color="#fff") {
+    const msg = String(text || "").trim();
+    if (!msg) return;
+    chatMessages.push({ who, text: Array.from(msg).slice(0, 80).join(""), color });
+    if (chatMessages.length > 8) chatMessages.splice(0, chatMessages.length - 8);
+  }
+
+  function sendChat() {
+    const msg = chatInput.trim();
+    if (!msg) return;
+    pushChat(getLocalName(), msg, chars[selectedChar].accent);
+    sendMsg({ type: "chat", name: getLocalName(), text: msg });
+    chatInput = "";
+    chatEditActive = true;
+  }
+
+  function adjustOnlineDuration(step) {
+    if (role !== "host") return;
+    const idx = Math.max(0, ONLINE_DURATIONS.indexOf(onlineDuration));
+    const next = (idx + step + ONLINE_DURATIONS.length) % ONLINE_DURATIONS.length;
+    onlineDuration = ONLINE_DURATIONS[next];
+    onlineLocalReady = false;
+    onlineRemoteReady = false;
+    sendMsg({ type: "settings", duration: onlineDuration, bgm: onlineBgmKey, resetReady: true });
+    broadcastLobbyState();
+  }
+
+  function adjustOnlineBgm(step) {
+    if (role !== "host") return;
+    const idx = Math.max(0, ONLINE_BGM_OPTIONS.findIndex(o => o.key === onlineBgmKey));
+    onlineBgmKey = ONLINE_BGM_OPTIONS[(idx + step + ONLINE_BGM_OPTIONS.length) % ONLINE_BGM_OPTIONS.length].key;
+    onlineLocalReady = false;
+    onlineRemoteReady = false;
+    sendMsg({ type: "settings", duration: onlineDuration, bgm: onlineBgmKey, resetReady: true });
+    broadcastLobbyState();
+  }
+
+  function maybeStartOnlineCountdown() {
+    if (role === "host" && state === "onlineLobby" && connected && onlineLocalReady && onlineRemoteReady) {
+      startOnlineCountdown(true);
+    }
+  }
+
+  function startOnlineCountdown(broadcast=true) {
+    ensureOnlinePlayers();
+    gameMode = "online";
+    menuOpen = false;
+    particles = [];
+    floating = [];
+    result = null;
+    onlineCountdownEnd = nowSec() + 3.8;
+    setState("onlineCountdown");
+    playSfx("ready", 1.1);
+    if (broadcast) sendMsg({ type: "start_countdown", duration: onlineDuration, bgm: onlineBgmKey, hostName: getLocalName(), hostChar: selectedChar });
+  }
+
+  function startOnlineMatch() {
+    gameMode = "online";
+    ensureOnlinePlayers();
+    const remoteChar = remote ? remote.char : (1 - selectedChar);
+    const remoteName = remote ? remote.name : "상대";
+    local = defaultPlayer(selectedChar, "left", getLocalName());
+    remote = defaultPlayer(remoteChar, "right", remoteName);
+    stageIndex = 0;
+    stageDuration = onlineDuration;
+    stageStart = nowSec();
+    particles = [];
+    floating = [];
+    result = null;
+    onlineLocalReady = false;
+    onlineRemoteReady = false;
+    addText(W/2, 170, "게임 시작!", "#fff0a8", 44, 1.2);
+    setState("playing");
+    sendState(true);
+  }
+
+  function onlineReturnLobby(broadcast=true, notice="온라인 로비로 돌아왔습니다.") {
+    if (broadcast) sendMsg({ type: "leave_lobby" });
+    ensureOnlinePlayers();
+    const remoteChar = remote ? remote.char : (1 - selectedChar);
+    const remoteName = remote ? remote.name : "상대";
+    local = defaultPlayer(selectedChar, "left", getLocalName());
+    remote = defaultPlayer(remoteChar, "right", remoteName);
+    onlineLocalReady = false;
+    onlineRemoteReady = false;
+    particles = [];
+    floating = [];
+    result = null;
+    onlineNotice = notice;
+    setState("onlineLobby");
+    broadcastLobbyState();
+  }
+
+  function handleDisconnected() {
+    if (gameMode === "online" || state === "onlineLobby" || state === "onlineCountdown" || state === "connected") {
+      onlineNotice = "상대와 연결이 끊어졌습니다.";
+      closePeer();
+      local = null;
+      remote = null;
+      setState("mode");
+      addText(W/2, 210, "상대와 연결이 끊어졌습니다", "#ffb0b0", 34, 1.6);
+    }
+  }
+
+  function lobbyButton(id, x, y, w, h, label, fill="#24154f", disabled=false) {
+    onlineLobbyButtons.push({ id, x, y, w, h, disabled });
+    ctx.save();
+    ctx.globalAlpha = disabled ? .45 : 1;
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = disabled ? "rgba(255,255,255,.35)" : "rgba(255,255,255,.82)";
+    ctx.lineWidth = 2;
+    roundRect(x, y, w, h, 14);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText(label, x + w/2, y + h/2, 18, disabled ? "#aaa" : "#fff", "center", true);
+  }
+
+  function drawInputBox(id, x, y, w, h, text, active, placeholder="") {
+    onlineLobbyButtons.push({ id, x, y, w, h, disabled:false });
+    ctx.save();
+    ctx.fillStyle = active ? "rgba(25,25,55,.92)" : "rgba(5,5,18,.78)";
+    ctx.strokeStyle = active ? "#fff0a8" : "rgba(255,255,255,.65)";
+    ctx.lineWidth = active ? 3 : 2;
+    roundRect(x, y, w, h, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    const label = text || placeholder;
+    drawText(label, x + 16, y + h/2, 19, text ? "#fff" : "#9aa", "left", true);
+    if (active && Math.floor(nowSec()*2) % 2 === 0) drawText("|", x + w - 20, y + h/2, 20, "#fff0a8", "center", false);
+  }
+
+  function drawOnlineLobby() {
+    onlineLobbyButtons = [];
+    drawImageCover(assets.bg, 0,0,W,H);
+    ctx.fillStyle = "rgba(0,0,0,.44)"; ctx.fillRect(0,0,W,H);
+    drawPanel(105, 45, 1070, 660);
+    drawText("온라인 1:1 대전 로비", W/2, 88, 42, "#fff0a8");
+    drawText(role === "host" ? "방장" : "참가자", W/2, 128, 24, role === "host" ? "#bfe8ff" : "#ffd6ff");
+
+    ensureOnlinePlayers();
+    const lReady = onlineLocalReady ? "READY" : "대기";
+    const rReady = onlineRemoteReady ? "READY" : "대기";
+
+    drawPanel(150, 175, 440, 175);
+    drawText("내 정보", 370, 202, 24, chars[selectedChar].accent);
+    drawText(`캐릭터: ${chars[selectedChar].name}`, 370, 232, 20, "#fff");
+    drawInputBox("nameInput", 190, 258, 360, 46, getLocalName(), nameEditActive, "닉네임 입력");
+    drawText(`상태: ${lReady}`, 370, 330, 21, onlineLocalReady ? "#b6ffb6" : "#fff0a8");
+
+    const rc = remote ? chars[remote.char] || chars[1-selectedChar] : chars[1-selectedChar];
+    drawPanel(690, 175, 440, 175);
+    drawText("상대 정보", 910, 202, 24, rc.accent);
+    drawText(`캐릭터: ${remote ? chars[remote.char].name : "대기 중"}`, 910, 232, 20, "#fff");
+    drawText(remote ? remote.name : "상대 접속 대기", 910, 282, 28, "#fff");
+    drawText(`상태: ${rReady}`, 910, 330, 21, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
+
+    drawPanel(150, 370, 980, 205);
+    drawText("로비 채팅", 235, 395, 20, "#bfe8ff", "left");
+    let cy = 425;
+    for (const m of chatMessages.slice(-5)) {
+      drawText(`${m.who}: ${m.text}`, 180, cy, 17, m.color || "#fff", "left", true);
+      cy += 28;
+    }
+    drawInputBox("chatInput", 180, 528, 775, 42, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
+    lobbyButton("sendChat", 970, 528, 120, 42, "전송", "#5a2ac6");
+
+    drawPanel(610, 585, 520, 108);
+    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 755, 611, 20, "#fff");
+    lobbyButton("durPrev", 870, 591, 48, 38, "◀", "#2d225e", role !== "host");
+    lobbyButton("durNext", 924, 591, 48, 38, "▶", "#2d225e", role !== "host");
+    drawText(`BGM: ${onlineBgmLabel()}`, 630, 660, 18, "#fff0a8", "left");
+    lobbyButton("bgmPrev", 870, 646, 48, 38, "◀", "#2d225e", role !== "host");
+    lobbyButton("bgmNext", 924, 646, 48, 38, "▶", "#2d225e", role !== "host");
+
+    lobbyButton("ready", 210, 600, 180, 54, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
+    lobbyButton("lobbyBack", 420, 600, 160, 54, "나가기", "#3b3b4f");
+
+    if (onlineNotice) drawText(onlineNotice, W/2, 700, 18, "#fff0a8");
+    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 795, 570, 17, "#d8d8e8");
+  }
+
+  function drawOnlineCountdown() {
+    drawImageCover(assets.bg, 0,0,W,H);
+    ctx.fillStyle = "rgba(0,0,0,.50)"; ctx.fillRect(0,0,W,H);
+    drawPanel(250, 185, 780, 350);
+    const rem = Math.max(0, onlineCountdownEnd - nowSec());
+    let label = "게임 시작!";
+    if (rem > 2.8) label = "게임 시작 3초전";
+    else if (rem > 1.8) label = "게임 시작 2초전";
+    else if (rem > .8) label = "게임 시작 1초전";
+    drawText(label, W/2, 295, 54, "#fff0a8");
+    drawText(`${getLocalName()}  VS  ${remote ? remote.name : "상대"}`, W/2, 375, 28, "#fff");
+    drawText(`플레이 시간 ${Math.round(onlineDuration/60)}분 / ${onlineBgmLabel()}`, W/2, 430, 24, "#bfe8ff");
+  }
+
+  function handleOnlineLobbyClick(x, y) {
+    for (const b of onlineLobbyButtons) {
+      if (b.disabled) continue;
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+        nameEditActive = b.id === "nameInput";
+        chatEditActive = b.id === "chatInput";
+        if (b.id === "nameInput") {
+          const entered = window.prompt("닉네임을 입력하세요. 한글 12자 / 영문 18자 이내", getLocalName());
+          if (entered !== null) { localPlayerName = sanitizePlayerName(entered); if (local) local.name = localPlayerName; onlineLocalReady = false; broadcastLobbyState(); }
+          nameEditActive = false;
+        }
+        else if (b.id === "chatInput") {
+          const entered = window.prompt("채팅 메시지를 입력하세요.", chatInput);
+          if (entered !== null) { chatInput = Array.from(String(entered)).slice(0, 80).join(""); sendChat(); }
+          chatEditActive = false;
+        }
+        else if (b.id === "ready") setOnlineReady(!onlineLocalReady);
+        else if (b.id === "lobbyBack") { sendMsg({ type:"disconnect_notice" }); closePeer(); local = null; remote = null; setState("mode"); }
+        else if (b.id === "sendChat") sendChat();
+        else if (b.id === "durPrev") adjustOnlineDuration(-1);
+        else if (b.id === "durNext") adjustOnlineDuration(1);
+        else if (b.id === "bgmPrev") adjustOnlineBgm(-1);
+        else if (b.id === "bgmNext") adjustOnlineBgm(1);
+        if (b.id !== "nameInput" && b.id !== "chatInput") { nameEditActive = false; if (b.id !== "sendChat") chatEditActive = false; }
+        return true;
+      }
+    }
+    nameEditActive = false;
+    chatEditActive = false;
+    return false;
+  }
+
   function handleMenuClick(x, y) {
     if (!menuOpen) return;
     for (const b of menuButtons) {
@@ -663,7 +952,11 @@
         else if (b.id === "setStarKey") waitingKeyAction = "star";
         else if (b.id === "setAutoKey") waitingKeyAction = "auto";
         else if (b.id === "bgmMute") { bgmMuted = !bgmMuted; applyVolumes(); saveSettings(); }
-        else if (b.id === "title") { closeMenu(); closePeer(); local = null; remote = null; finalStats = []; setState("title"); }
+        else if (b.id === "title") {
+          closeMenu();
+          if (gameMode === "online" && connected) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
+          else { closePeer(); local = null; remote = null; finalStats = []; setState("title"); }
+        }
         else if (b.id === "fullscreen") {
           const target = document.documentElement;
           if (!document.fullscreenElement && target.requestFullscreen) target.requestFullscreen().catch(()=>{});
@@ -697,16 +990,21 @@
       const h = getTitleHotspot(p);
       if (h) { openTitleLink(h); return; }
     }
+    if (state === "onlineLobby") {
+      if (handleOnlineLobbyClick(p.x, p.y)) return;
+    }
     if (p.x >= 1158 && p.x <= 1262 && p.y >= 654 && p.y <= 702) {
-      openMenu();
+      if (state === "playing" && gameMode === "online") onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
+      else openMenu();
     }
   });
 
   canvas.addEventListener("mousemove", (evt) => {
     mouse = canvasPoint(evt);
     const overTitleLink = !!getTitleHotspot(mouse);
+    const overLobbyButton = state === "onlineLobby" && onlineLobbyButtons.some(b => !b.disabled && inRect(mouse, b));
     const overMenu = !menuOpen && mouse.x >= 1158 && mouse.x <= 1262 && mouse.y >= 654 && mouse.y <= 702;
-    canvas.style.cursor = (overTitleLink || overMenu) ? "pointer" : "default";
+    canvas.style.cursor = (overTitleLink || overLobbyButton || overMenu) ? "pointer" : "default";
   });
 
   canvas.addEventListener("mouseleave", () => {
@@ -730,16 +1028,12 @@
   }
 
   function startOnlineAsReady() {
-    gameMode = "online";
-    if (!local) local = defaultPlayer(selectedChar, "left");
-    if (!remote) remote = defaultPlayer(1 - selectedChar, "right", "상대");
-    finalStats = [];
-    startStage(0);
+    startOnlineMatch();
   }
 
   function startStage(idx, broadcast=true) {
     stageIndex = idx;
-    stageDuration = STAGES[idx].duration;
+    stageDuration = gameMode === "online" ? onlineDuration : STAGES[idx].duration;
     if (!local) local = defaultPlayer(selectedChar, "left");
     if (!remote) remote = defaultPlayer(1-selectedChar, "right");
     local = resetPlayerKeepChar(local, "left");
@@ -767,9 +1061,10 @@
       star: local.starEarned,
       donggop: local.donggopEarned,
       fever: local.feverCount,
-      stage: stageIndex + 1,
+      stage: gameMode === "online" ? 1 : stageIndex + 1,
+      online: gameMode === "online",
     };
-    finalStats.push(result);
+    if (gameMode !== "online") finalStats.push(result);
     playSfx(result.win ? "resultWin" : "resultLose", 1.0);
     setState("result");
   }
@@ -886,7 +1181,7 @@
     sendMsg({
       type: "state",
       char: selectedChar,
-      name: chars[selectedChar].name,
+      name: localPlayerName || chars[selectedChar].name,
       score: local.score,
       combo: local.combo,
       cpm: cpm(local, false),
@@ -900,10 +1195,50 @@
 
   function receiveMsg(msg) {
     if (msg.type === "hello") {
-      remote = defaultPlayer(msg.char ?? 1, "right", msg.name || chars[msg.char ?? 1].name);
-      if (state === "connected" && role === "host") {
-        startStage(0, true);
+      const rChar = Number.isInteger(msg.char) ? msg.char : (1 - selectedChar);
+      remote = defaultPlayer(rChar, "right", sanitizePlayerName(msg.name || chars[rChar].name));
+      onlineRemoteReady = false;
+      if (state === "connected" || state === "onlineLobby" || state === "mode") {
+        setState("onlineLobby");
+        onlineNotice = "상대가 접속했습니다. 닉네임과 옵션을 확인한 뒤 READY를 눌러주세요.";
       }
+      broadcastLobbyState();
+    } else if (msg.type === "lobby_state" || msg.type === "ready") {
+      const rChar = Number.isInteger(msg.char) ? msg.char : (remote ? remote.char : 1 - selectedChar);
+      remote = defaultPlayer(rChar, "right", sanitizePlayerName(msg.name || (remote ? remote.name : chars[rChar].name)));
+      onlineRemoteReady = !!msg.ready;
+      if (role !== "host") {
+        if (typeof msg.duration === "number") onlineDuration = msg.duration;
+        if (msg.bgm) onlineBgmKey = msg.bgm;
+      }
+      if (state === "connected") setState("onlineLobby");
+      maybeStartOnlineCountdown();
+    } else if (msg.type === "settings") {
+      if (role !== "host") {
+        if (typeof msg.duration === "number") onlineDuration = msg.duration;
+        if (msg.bgm) onlineBgmKey = msg.bgm;
+      }
+      if (msg.resetReady) {
+        onlineLocalReady = false;
+        onlineRemoteReady = false;
+        onlineNotice = "방장 옵션이 변경되어 READY가 초기화되었습니다.";
+      }
+    } else if (msg.type === "chat") {
+      pushChat(sanitizePlayerName(msg.name || (remote ? remote.name : "상대")), msg.text || "", remote ? chars[remote.char].accent : "#ffd6ff");
+    } else if (msg.type === "start_countdown") {
+      if (typeof msg.duration === "number") onlineDuration = msg.duration;
+      if (msg.bgm) onlineBgmKey = msg.bgm;
+      onlineRemoteReady = true;
+      onlineLocalReady = true;
+      startOnlineCountdown(false);
+    } else if (msg.type === "leave_lobby") {
+      onlineReturnLobby(false, "상대가 온라인 로비로 돌아갔습니다.");
+    } else if (msg.type === "disconnect_notice") {
+      onlineNotice = "상대가 접속을 종료했습니다.";
+      closePeer();
+      local = null;
+      remote = null;
+      setState("mode");
     } else if (msg.type === "stage_start") {
       startStage(Number(msg.stage || 0), false);
     } else if (msg.type === "hit") {
@@ -914,7 +1249,7 @@
     } else if (msg.type === "state") {
       if (!remote) remote = defaultPlayer(msg.char ?? 1, "right");
       remote.char = msg.char ?? remote.char;
-      remote.name = msg.name || remote.name;
+      remote.name = sanitizePlayerName(msg.name || remote.name);
       const delta = Math.max(0, Math.min(18, (msg.score || 0) - remote.score));
       for (let i=0; i<delta; i++) hit(remote, false, false, "sync", false);
       remote.score = Math.max(remote.score, msg.score || 0);
@@ -924,12 +1259,12 @@
       remote.fUnlocked = !!msg.fUnlocked;
       remote.fTimer = msg.fTimer || 0;
     } else if (msg.type === "item") {
-      if (msg.item === "star" && remote) remote.starPopup = 1.0;
+      if (msg.item === "star" && remote) remote.starPopup = 2.0;
     }
   }
 
   function closePeer() {
-    try { if (dc) dc.close(); } catch {}
+    try { if (dc) { dc.onclose = null; dc.onerror = null; dc.close(); } } catch {}
     try { if (pc) pc.close(); } catch {}
     pc = null; dc = null; connected = false; role = "none";
   }
@@ -973,22 +1308,21 @@
       connected = true;
       gameMode = "online";
       signalPanel.classList.add("hidden");
-      local = defaultPlayer(selectedChar, "left");
-      sendMsg({ type:"hello", char:selectedChar, name:chars[selectedChar].name });
-      setState("connected");
-      if (role === "host") {
-        addText(W/2, 300, "상대 정보 확인 중...", "#fff0a8", 32, 1.2);
-        setTimeout(() => {
-          if (dc && dc.readyState === "open" && state === "connected") {
-            startStage(0, true);
-          }
-        }, 600);
-      }
+      localPlayerName = getLocalName();
+      local = defaultPlayer(selectedChar, "left", localPlayerName);
+      if (!remote) remote = defaultPlayer(1 - selectedChar, "right", "상대");
+      onlineLocalReady = false;
+      onlineRemoteReady = false;
+      onlineNotice = "연결 완료! 닉네임을 입력하고 양쪽 모두 READY를 누르면 시작합니다.";
+      sendMsg({ type:"hello", char:selectedChar, name:localPlayerName });
+      setState("onlineLobby");
+      setTimeout(broadcastLobbyState, 250);
     };
     dc.onmessage = (ev) => {
       try { receiveMsg(JSON.parse(ev.data)); } catch {}
     };
-    dc.onclose = () => addText(W/2, 160, "연결 종료", "#ffb0b0", 42, 1.4);
+    dc.onclose = () => handleDisconnected();
+    dc.onerror = () => handleDisconnected();
   }
 
   async function hostFlow() {
@@ -1071,11 +1405,36 @@
     unlockAudio();
     const k = e.key.toLowerCase();
     if (e.key === "Escape") {
-      if (menuOpen) closeMenu();
+      if (state === "playing" && gameMode === "online" && !menuOpen) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
+      else if (menuOpen) closeMenu();
       else openMenu();
       return;
     }
     if (menuOpen) return;
+    if (state === "onlineLobby") {
+      if (nameEditActive) {
+        if (e.key === "Enter") { nameEditActive = false; localPlayerName = getLocalName(); broadcastLobbyState(); return; }
+        if (e.key === "Escape") { nameEditActive = false; return; }
+        if (e.key === "Backspace") { localPlayerName = Array.from(localPlayerName || "").slice(0, -1).join(""); broadcastLobbyState(); return; }
+        if (e.key && e.key.length === 1) {
+          const next = sanitizePlayerName((localPlayerName || "") + e.key);
+          localPlayerName = next;
+          if (local) local.name = next;
+          broadcastLobbyState();
+        }
+        return;
+      }
+      if (chatEditActive) {
+        if (e.key === "Enter") { sendChat(); return; }
+        if (e.key === "Escape") { chatEditActive = false; return; }
+        if (e.key === "Backspace") { chatInput = Array.from(chatInput || "").slice(0, -1).join(""); return; }
+        if (e.key && e.key.length === 1 && Array.from(chatInput).length < 80) chatInput += e.key;
+        return;
+      }
+      if (e.key === "Enter") setOnlineReady(!onlineLocalReady);
+      return;
+    }
+    if (state === "onlineCountdown") return;
     if (state === "title" && (e.key === "Enter" || e.key === " ")) {
       setState("select"); playSfx("select"); return;
     }
@@ -1122,8 +1481,7 @@
           setState("ending");
         }
       } else {
-        if (stageIndex < STAGES.length - 1) startStage(stageIndex + 1);
-        else setState("mode");
+        onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
       }
       return;
     }
@@ -1142,12 +1500,16 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if ([" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
+    if (state === "onlineLobby" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
   function update(dt) {
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
+    if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
+      startOnlineMatch();
+      return;
+    }
     if (menuOpen) return;
     if (state === "result" && result && result.autoReturnTitle) {
       result.returnTimer = (result.returnTimer || 3.0) - dt;
@@ -1288,9 +1650,9 @@
     const left = timeLeft();
     const mm = Math.floor(left/60).toString().padStart(2,"0");
     const ss = Math.floor(left%60).toString().padStart(2,"0");
-    drawText(`${STAGES[stageIndex].name} / ${gameMode === "single" ? "AI 대전" : "ONLINE P2P"}`, W/2, 28, 28, "#fff");
+    drawText(gameMode === "single" ? `${STAGES[stageIndex].name} / AI 대전` : "ONLINE 1:1 대전", W/2, 28, 28, "#fff");
     drawText(`${mm}:${ss}`, W/2, 76, 42, "#fff0a8");
-    drawText(`난이도 ${STAGES[stageIndex].rank}`, W/2, 114, 22, "#fff");
+    drawText(gameMode === "single" ? `난이도 ${STAGES[stageIndex].rank}` : `${getLocalName()} vs ${remote ? remote.name : "상대"}`, W/2, 114, 22, "#fff");
 
     drawPanel(220, 590, 840, 128);
     const bStatus = local.fUnlocked
@@ -1553,7 +1915,11 @@
       drawImageCover(assets.bg,0,0,W,H);
       drawPanel(270,220,740,260);
       drawText("ONLINE 연결 완료", W/2, 285, 46, "#fff0a8");
-      drawText("곧 스테이지가 시작됩니다.", W/2, 360, 28, "#fff");
+      drawText("온라인 로비로 이동합니다.", W/2, 360, 28, "#fff");
+    } else if (state === "onlineLobby") {
+      drawOnlineLobby();
+    } else if (state === "onlineCountdown") {
+      drawOnlineCountdown();
     } else if (state === "playing") {
       drawImageCover(assets.bg,0,0,W,H);
       ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(0,0,W,H);
@@ -1590,7 +1956,7 @@
       drawText(`별풍선 ${result.star}회 / 동꼽 ${result.donggop}개 / 피버 ${result.fever}회`, W/2, 467, 25);
       drawText(`최대 콤보 ${result.combo}`, W/2, 517, 25);
 
-      let next = gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : (stageIndex < 4 ? "다음 스테이지" : "모드 선택");
+      let next = gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비";
       if (result.autoReturnTitle) {
         drawText(`5스테이지 3회 실패 - ${Math.ceil(result.returnTimer || 3)}초 후 초기화면`, W/2, 585, 23, "#ffb3c7");
         next = "초기화면";
