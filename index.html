@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>동꼽즈 AI & ONLINE</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+    <div id="signalPanel" class="signal hidden">
+      <div class="signalBox">
+        <h2>WebRTC P2P ONLINE 1:1 접속</h2>
+        <p class="muted">
+          서버 없이 브라우저끼리 직접 연결합니다. 한 명은 <b>방 만들기</b>, 다른 한 명은 <b>방 참가</b>를 누르세요.
+          생성된 코드는 카톡/디스코드/채팅으로 서로 복사해서 전달하면 됩니다.
+        </p>
+        <div class="row">
+          <button id="hostBtn">방 만들기</button>
+          <button id="joinBtn">방 참가</button>
+          <button id="backBtn">뒤로</button>
+        </div>
+        <div id="signalSteps" class="steps"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
