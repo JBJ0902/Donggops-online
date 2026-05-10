@@ -458,14 +458,15 @@
 
   function menuRect() {
     // 온라인 로비에서는 큰 로비 UI와 겹치지 않도록 오른쪽 바깥 여백에 배치
-    if (state === "onlineLobby") return { x: 1178, y: 620, w: 92, h: 48 };
+    if (state === "onlineLobby") return { x: 1168, y: 666, w: 96, h: 42 };
     return { x: 1158, y: 654, w: 104, h: 48 };
   }
 
   function drawMenuIcon() {
     if (state === "loading") return;
     const { x, y, w, h } = menuRect();
-    const label = (state === "playing" && gameMode === "online") ? "LOBBY" : "MENU";
+    const onlineActive = (gameMode === "online" || role === "host" || role === "guest") && (state === "playing" || state === "onlineCountdown");
+    const label = onlineActive ? "LOBBY" : "MENU";
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,.58)";
     ctx.strokeStyle = "rgba(255,255,255,.8)";
@@ -873,10 +874,10 @@
     drawImageCover(assets.bg, 0,0,W,H);
     ctx.fillStyle = "rgba(0,0,0,.44)"; ctx.fillRect(0,0,W,H);
 
-    // 로비 전체 배치 재정렬: 채팅, 옵션, MENU 버튼이 서로 겹치지 않도록 영역 분리
-    drawPanel(92, 38, 1068, 650);
-    drawText("온라인 1:1 대전 로비", W/2, 75, 38, "#fff0a8");
-    drawText(role === "host" ? "방장" : "참가자", W/2, 112, 23, role === "host" ? "#bfe8ff" : "#ffd6ff");
+    // 로비 전체 배치 재정렬: 우측 MENU 버튼 영역을 비워두고, 채팅/입력/옵션이 서로 겹치지 않게 분리
+    drawPanel(92, 34, 1068, 656);
+    drawText("온라인 1:1 대전 로비", W/2, 70, 36, "#fff0a8");
+    drawText(role === "host" ? "방장" : "참가자", W/2, 107, 22, role === "host" ? "#bfe8ff" : "#ffd6ff");
 
     ensureOnlinePlayers();
     const lReady = onlineLocalReady ? "READY" : "대기";
@@ -884,51 +885,64 @@
 
     if (onlineNotice) {
       ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,.42)";
-      ctx.strokeStyle = "rgba(255,240,168,.50)";
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.strokeStyle = "rgba(255,240,168,.55)";
       ctx.lineWidth = 1.5;
-      roundRect(250, 126, 780, 32, 14);
+      roundRect(215, 122, 850, 34, 14);
       ctx.fill();
       ctx.stroke();
       ctx.restore();
-      drawText(onlineNotice, W/2, 142, 16, "#fff0a8", "center", true);
+      const notice = onlineNotice.length > 54 ? onlineNotice.slice(0, 53) + "…" : onlineNotice;
+      drawText(notice, W/2, 139, 15, "#fff0a8", "center", true);
     }
 
-    drawPanel(150, 165, 440, 155);
-    drawText("내 정보", 370, 190, 23, chars[selectedChar].accent);
-    drawText(`캐릭터: ${chars[selectedChar].name}`, 370, 219, 19, "#fff");
-    drawInputBox("nameInput", 190, 242, 360, 42, getLocalName(), nameEditActive, "닉네임 입력");
-    drawText(`상태: ${lReady}`, 370, 303, 20, onlineLocalReady ? "#b6ffb6" : "#fff0a8");
+    drawPanel(150, 165, 440, 150);
+    drawText("내 정보", 370, 188, 22, chars[selectedChar].accent);
+    drawText(`캐릭터: ${chars[selectedChar].name}`, 370, 216, 18, "#fff");
+    drawInputBox("nameInput", 190, 238, 360, 42, getLocalName(), nameEditActive, "닉네임 입력");
+    drawText(`상태: ${lReady}`, 370, 300, 20, onlineLocalReady ? "#b6ffb6" : "#fff0a8");
 
     const rc = remote ? chars[remote.char] || chars[1-selectedChar] : chars[1-selectedChar];
-    drawPanel(690, 165, 440, 155);
-    drawText("상대 정보", 910, 190, 23, rc.accent);
-    drawText(`캐릭터: ${remote ? chars[remote.char].name : "대기 중"}`, 910, 219, 19, "#fff");
-    drawText(remote ? remote.name : "상대 접속 대기", 910, 262, 25, "#fff");
-    drawText(`상태: ${rReady}`, 910, 303, 20, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
+    drawPanel(690, 165, 440, 150);
+    drawText("상대 정보", 910, 188, 22, rc.accent);
+    drawText(`캐릭터: ${remote ? chars[remote.char].name : "대기 중"}`, 910, 216, 18, "#fff");
+    drawText(remote ? remote.name : "상대 접속 대기", 910, 257, 24, "#fff");
+    drawText(`상태: ${rReady}`, 910, 300, 20, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
 
-    drawPanel(150, 335, 980, 178);
-    drawText("로비 채팅", 235, 360, 19, "#bfe8ff", "left");
+    // 채팅 영역: 메시지 출력 영역과 입력창 영역을 명확히 분리
+    drawPanel(150, 330, 980, 200);
+    drawText("로비 채팅", 235, 354, 19, "#bfe8ff", "left");
+    ctx.save();
+    ctx.beginPath();
+    roundRect(172, 372, 915, 88, 10);
+    ctx.clip();
     let cy = 388;
     for (const m of chatMessages.slice(-4)) {
       const line = `${m.who}: ${m.text}`;
-      drawText(line.length > 48 ? line.slice(0, 47) + "…" : line, 180, cy, 16, m.color || "#fff", "left", true);
-      cy += 25;
+      drawText(line.length > 52 ? line.slice(0, 51) + "…" : line, 180, cy, 16, m.color || "#fff", "left", true);
+      cy += 23;
     }
-    drawInputBox("chatInput", 180, 466, 775, 40, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
-    lobbyButton("sendChat", 970, 466, 120, 40, "전송", "#5a2ac6");
+    ctx.restore();
+    drawInputBox("chatInput", 180, 474, 775, 40, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
+    lobbyButton("sendChat", 970, 474, 120, 40, "전송", "#5a2ac6");
 
-    lobbyButton("ready", 210, 548, 180, 52, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
-    lobbyButton("lobbyBack", 420, 548, 160, 52, "나가기", "#3b3b4f");
+    lobbyButton("ready", 185, 558, 180, 52, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
+    lobbyButton("lobbyBack", 395, 558, 160, 52, "나가기", "#3b3b4f");
 
-    drawPanel(610, 530, 520, 145);
-    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 870, 550, 15, "#d8d8e8");
-    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 760, 580, 19, "#fff");
-    lobbyButton("durPrev", 870, 560, 48, 38, "◀", "#2d225e", role !== "host");
-    lobbyButton("durNext", 924, 560, 48, 38, "▶", "#2d225e", role !== "host");
-    drawText(`BGM: ${onlineBgmLabel()}`, 630, 640, 17, "#fff0a8", "left");
-    lobbyButton("bgmPrev", 870, 620, 48, 38, "◀", "#2d225e", role !== "host");
-    lobbyButton("bgmNext", 924, 620, 48, 38, "▶", "#2d225e", role !== "host");
+    // 상태 안내문은 BGM 선택 박스와 겹치지 않도록 하단 좌측에 고정
+    if (onlineNotice) {
+      const notice2 = onlineNotice.length > 38 ? onlineNotice.slice(0, 37) + "…" : onlineNotice;
+      drawText(notice2, 370, 648, 15, "#fff0a8", "center", true);
+    }
+
+    drawPanel(620, 548, 510, 128);
+    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 875, 566, 14, "#d8d8e8");
+    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 765, 594, 18, "#fff");
+    lobbyButton("durPrev", 875, 574, 48, 36, "◀", "#2d225e", role !== "host");
+    lobbyButton("durNext", 929, 574, 48, 36, "▶", "#2d225e", role !== "host");
+    drawText(`BGM: ${onlineBgmLabel()}`, 640, 646, 16, "#fff0a8", "left");
+    lobbyButton("bgmPrev", 875, 626, 48, 36, "◀", "#2d225e", role !== "host");
+    lobbyButton("bgmNext", 929, 626, 48, 36, "▶", "#2d225e", role !== "host");
   }
 
   function drawOnlineCountdown() {
@@ -1032,7 +1046,8 @@
     }
     const mr = menuRect();
     if (p.x >= mr.x && p.x <= mr.x + mr.w && p.y >= mr.y && p.y <= mr.y + mr.h) {
-      if (state === "playing" && gameMode === "online") onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
+      const onlineActive = (gameMode === "online" || role === "host" || role === "guest") && (state === "playing" || state === "onlineCountdown");
+      if (onlineActive) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
       else openMenu();
     }
   });
@@ -1311,9 +1326,8 @@
   function openConnectionPanel() {
     signalPanel.classList.remove("hidden");
     signalSteps.innerHTML = `
-      <p class="ok">방식: 수동 WebRTC P2P 코드 교환</p>
       <p>1명은 <b>방 만들기</b>, 다른 1명은 <b>방 참가</b>를 누르세요.</p>
-      <p class="warn">VPN, 회사/학교 방화벽, LTE/5G 일부 환경에서는 WebRTC P2P 연결이 실패할 수 있습니다.</p>
+      <p class="warn">VPN, 회사/학교 방화벽, LTE/5G 일부 환경에서는 온라인 1:1 접속 연결이 실패할 수 있습니다.</p>
     `;
   }
 
@@ -1661,7 +1675,7 @@
 
     if (gameMode === "online") {
       const isLeft = isLocal;
-      const roleLabel = isLeft ? "PLAYER" : "P2";
+      const roleLabel = isLeft ? "PLAYER 1" : "PLAYER 2";
       drawPanel(x-165, 30, 330, isLeft ? 238 : 218);
       drawText(roleLabel, x, 56, 22, c.accent);
       drawText(player.name || (isLeft ? getLocalName() : "상대"), x, 86, 28, "#fff");
