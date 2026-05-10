@@ -737,7 +737,7 @@
     startStage(0);
   }
 
-  function startStage(idx) {
+  function startStage(idx, broadcast=true) {
     stageIndex = idx;
     stageDuration = STAGES[idx].duration;
     if (!local) local = defaultPlayer(selectedChar, "left");
@@ -753,7 +753,7 @@
     stageStart = nowSec();
     setState("playing");
     addText(W/2, 170, `${STAGES[idx].name} 시작!`, "#fff0a8", 42, 1.3);
-    if (gameMode === "online") sendMsg({ type: "stage_start", stage: idx });
+    if (gameMode === "online" && broadcast) sendMsg({ type: "stage_start", stage: idx });
   }
 
   function finishStage() {
@@ -902,11 +902,10 @@
     if (msg.type === "hello") {
       remote = defaultPlayer(msg.char ?? 1, "right", msg.name || chars[msg.char ?? 1].name);
       if (state === "connected" && role === "host") {
-        sendMsg({ type: "stage_start", stage: 0 });
-        startStage(0);
+        startStage(0, true);
       }
     } else if (msg.type === "stage_start") {
-      startStage(Number(msg.stage || 0));
+      startStage(Number(msg.stage || 0), false);
     } else if (msg.type === "hit") {
       if (!remote) remote = defaultPlayer(1-selectedChar, "right", "상대");
       hit(remote, true, false, msg.key || "A", false);
@@ -980,9 +979,8 @@
       if (role === "host") {
         addText(W/2, 300, "상대 정보 확인 중...", "#fff0a8", 32, 1.2);
         setTimeout(() => {
-          if (dc && dc.readyState === "open") {
-            sendMsg({ type: "stage_start", stage: 0 });
-            startStage(0);
+          if (dc && dc.readyState === "open" && state === "connected") {
+            startStage(0, true);
           }
         }, 600);
       }
@@ -995,8 +993,8 @@
 
   async function hostFlow() {
     unlockAudio();
-    role = "host";
     closePeer();
+    role = "host";
     pc = new RTCPeerConnection(rtcConfig);
     setupDC(pc.createDataChannel("donggop"));
     const offer = await pc.createOffer();
@@ -1024,8 +1022,8 @@
 
   async function joinFlow() {
     unlockAudio();
-    role = "guest";
     closePeer();
+    role = "guest";
     pc = new RTCPeerConnection(rtcConfig);
     pc.ondatachannel = (ev) => setupDC(ev.channel);
     signalSteps.innerHTML = `
