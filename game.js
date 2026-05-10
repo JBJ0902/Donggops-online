@@ -456,9 +456,16 @@
     drawText(label, x + w/2, y + h/2, 21, "#fff", "center", true);
   }
 
+  function menuRect() {
+    // 온라인 로비에서는 큰 로비 UI와 겹치지 않도록 오른쪽 바깥 여백에 배치
+    if (state === "onlineLobby") return { x: 1178, y: 620, w: 92, h: 48 };
+    return { x: 1158, y: 654, w: 104, h: 48 };
+  }
+
   function drawMenuIcon() {
     if (state === "loading") return;
-    const x = 1158, y = 654, w = 104, h = 48;
+    const { x, y, w, h } = menuRect();
+    const label = (state === "playing" && gameMode === "online") ? "LOBBY" : "MENU";
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,.58)";
     ctx.strokeStyle = "rgba(255,255,255,.8)";
@@ -467,7 +474,7 @@
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    drawText("MENU", x + w/2, y + h/2, 20, "#fff0a8", "center", true);
+    drawText(label, x + w/2, y + h/2, label === "LOBBY" ? 18 : 20, "#fff0a8", "center", true);
   }
 
   function drawMenuOverlay() {
@@ -838,60 +845,90 @@
     roundRect(x, y, w, h, 12);
     ctx.fill();
     ctx.stroke();
+
+    // 긴 안내문/채팅이 전송 버튼 영역까지 밀려 보이지 않도록 입력창 안에서만 표시
+    ctx.beginPath();
+    roundRect(x + 8, y + 4, w - 32, h - 8, 8);
+    ctx.clip();
+    const label = String(text || placeholder || "");
+    ctx.font = `800 18px Malgun Gothic, Apple SD Gothic Neo, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(0,0,0,.72)";
+    ctx.fillStyle = text ? "#fff" : "#9aa";
+    const maxW = w - 52;
+    let shown = label;
+    while (ctx.measureText(shown).width > maxW && shown.length > 1) shown = shown.slice(1);
+    if (shown !== label) shown = "…" + shown;
+    ctx.strokeText(shown, x + 16, y + h/2);
+    ctx.fillText(shown, x + 16, y + h/2);
     ctx.restore();
-    const label = text || placeholder;
-    drawText(label, x + 16, y + h/2, 19, text ? "#fff" : "#9aa", "left", true);
-    if (active && Math.floor(nowSec()*2) % 2 === 0) drawText("|", x + w - 20, y + h/2, 20, "#fff0a8", "center", false);
+
+    if (active && Math.floor(nowSec()*2) % 2 === 0) drawText("|", x + w - 18, y + h/2, 20, "#fff0a8", "center", false);
   }
 
   function drawOnlineLobby() {
     onlineLobbyButtons = [];
     drawImageCover(assets.bg, 0,0,W,H);
     ctx.fillStyle = "rgba(0,0,0,.44)"; ctx.fillRect(0,0,W,H);
-    drawPanel(105, 45, 1070, 660);
-    drawText("온라인 1:1 대전 로비", W/2, 88, 42, "#fff0a8");
-    drawText(role === "host" ? "방장" : "참가자", W/2, 128, 24, role === "host" ? "#bfe8ff" : "#ffd6ff");
+
+    // 로비 전체 배치 재정렬: 채팅, 옵션, MENU 버튼이 서로 겹치지 않도록 영역 분리
+    drawPanel(92, 38, 1068, 650);
+    drawText("온라인 1:1 대전 로비", W/2, 75, 38, "#fff0a8");
+    drawText(role === "host" ? "방장" : "참가자", W/2, 112, 23, role === "host" ? "#bfe8ff" : "#ffd6ff");
 
     ensureOnlinePlayers();
     const lReady = onlineLocalReady ? "READY" : "대기";
     const rReady = onlineRemoteReady ? "READY" : "대기";
 
-    drawPanel(150, 175, 440, 175);
-    drawText("내 정보", 370, 202, 24, chars[selectedChar].accent);
-    drawText(`캐릭터: ${chars[selectedChar].name}`, 370, 232, 20, "#fff");
-    drawInputBox("nameInput", 190, 258, 360, 46, getLocalName(), nameEditActive, "닉네임 입력");
-    drawText(`상태: ${lReady}`, 370, 330, 21, onlineLocalReady ? "#b6ffb6" : "#fff0a8");
+    if (onlineNotice) {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.42)";
+      ctx.strokeStyle = "rgba(255,240,168,.50)";
+      ctx.lineWidth = 1.5;
+      roundRect(250, 126, 780, 32, 14);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      drawText(onlineNotice, W/2, 142, 16, "#fff0a8", "center", true);
+    }
+
+    drawPanel(150, 165, 440, 155);
+    drawText("내 정보", 370, 190, 23, chars[selectedChar].accent);
+    drawText(`캐릭터: ${chars[selectedChar].name}`, 370, 219, 19, "#fff");
+    drawInputBox("nameInput", 190, 242, 360, 42, getLocalName(), nameEditActive, "닉네임 입력");
+    drawText(`상태: ${lReady}`, 370, 303, 20, onlineLocalReady ? "#b6ffb6" : "#fff0a8");
 
     const rc = remote ? chars[remote.char] || chars[1-selectedChar] : chars[1-selectedChar];
-    drawPanel(690, 175, 440, 175);
-    drawText("상대 정보", 910, 202, 24, rc.accent);
-    drawText(`캐릭터: ${remote ? chars[remote.char].name : "대기 중"}`, 910, 232, 20, "#fff");
-    drawText(remote ? remote.name : "상대 접속 대기", 910, 282, 28, "#fff");
-    drawText(`상태: ${rReady}`, 910, 330, 21, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
+    drawPanel(690, 165, 440, 155);
+    drawText("상대 정보", 910, 190, 23, rc.accent);
+    drawText(`캐릭터: ${remote ? chars[remote.char].name : "대기 중"}`, 910, 219, 19, "#fff");
+    drawText(remote ? remote.name : "상대 접속 대기", 910, 262, 25, "#fff");
+    drawText(`상태: ${rReady}`, 910, 303, 20, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
 
-    drawPanel(150, 370, 980, 205);
-    drawText("로비 채팅", 235, 395, 20, "#bfe8ff", "left");
-    let cy = 425;
-    for (const m of chatMessages.slice(-5)) {
-      drawText(`${m.who}: ${m.text}`, 180, cy, 17, m.color || "#fff", "left", true);
-      cy += 28;
+    drawPanel(150, 335, 980, 178);
+    drawText("로비 채팅", 235, 360, 19, "#bfe8ff", "left");
+    let cy = 388;
+    for (const m of chatMessages.slice(-4)) {
+      const line = `${m.who}: ${m.text}`;
+      drawText(line.length > 48 ? line.slice(0, 47) + "…" : line, 180, cy, 16, m.color || "#fff", "left", true);
+      cy += 25;
     }
-    drawInputBox("chatInput", 180, 528, 775, 42, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
-    lobbyButton("sendChat", 970, 528, 120, 42, "전송", "#5a2ac6");
+    drawInputBox("chatInput", 180, 466, 775, 40, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
+    lobbyButton("sendChat", 970, 466, 120, 40, "전송", "#5a2ac6");
 
-    drawPanel(610, 585, 520, 108);
-    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 755, 611, 20, "#fff");
-    lobbyButton("durPrev", 870, 591, 48, 38, "◀", "#2d225e", role !== "host");
-    lobbyButton("durNext", 924, 591, 48, 38, "▶", "#2d225e", role !== "host");
-    drawText(`BGM: ${onlineBgmLabel()}`, 630, 660, 18, "#fff0a8", "left");
-    lobbyButton("bgmPrev", 870, 646, 48, 38, "◀", "#2d225e", role !== "host");
-    lobbyButton("bgmNext", 924, 646, 48, 38, "▶", "#2d225e", role !== "host");
+    lobbyButton("ready", 210, 548, 180, 52, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
+    lobbyButton("lobbyBack", 420, 548, 160, 52, "나가기", "#3b3b4f");
 
-    lobbyButton("ready", 210, 600, 180, 54, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
-    lobbyButton("lobbyBack", 420, 600, 160, 54, "나가기", "#3b3b4f");
-
-    if (onlineNotice) drawText(onlineNotice, W/2, 700, 18, "#fff0a8");
-    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 795, 570, 17, "#d8d8e8");
+    drawPanel(610, 530, 520, 145);
+    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 870, 550, 15, "#d8d8e8");
+    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 760, 580, 19, "#fff");
+    lobbyButton("durPrev", 870, 560, 48, 38, "◀", "#2d225e", role !== "host");
+    lobbyButton("durNext", 924, 560, 48, 38, "▶", "#2d225e", role !== "host");
+    drawText(`BGM: ${onlineBgmLabel()}`, 630, 640, 17, "#fff0a8", "left");
+    lobbyButton("bgmPrev", 870, 620, 48, 38, "◀", "#2d225e", role !== "host");
+    lobbyButton("bgmNext", 924, 620, 48, 38, "▶", "#2d225e", role !== "host");
   }
 
   function drawOnlineCountdown() {
@@ -993,7 +1030,8 @@
     if (state === "onlineLobby") {
       if (handleOnlineLobbyClick(p.x, p.y)) return;
     }
-    if (p.x >= 1158 && p.x <= 1262 && p.y >= 654 && p.y <= 702) {
+    const mr = menuRect();
+    if (p.x >= mr.x && p.x <= mr.x + mr.w && p.y >= mr.y && p.y <= mr.y + mr.h) {
       if (state === "playing" && gameMode === "online") onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
       else openMenu();
     }
@@ -1003,7 +1041,8 @@
     mouse = canvasPoint(evt);
     const overTitleLink = !!getTitleHotspot(mouse);
     const overLobbyButton = state === "onlineLobby" && onlineLobbyButtons.some(b => !b.disabled && inRect(mouse, b));
-    const overMenu = !menuOpen && mouse.x >= 1158 && mouse.x <= 1262 && mouse.y >= 654 && mouse.y <= 702;
+    const mr = menuRect();
+    const overMenu = !menuOpen && mouse.x >= mr.x && mouse.x <= mr.x + mr.w && mouse.y >= mr.y && mouse.y <= mr.y + mr.h;
     canvas.style.cursor = (overTitleLink || overLobbyButton || overMenu) ? "pointer" : "default";
   });
 
@@ -1440,7 +1479,7 @@
     }
     if (state === "select") {
       if (k === "a" || e.key === "ArrowLeft") { selectedChar = 0; playSfx("move"); }
-      if (k === "b" || e.key === "ArrowRight") { selectedChar = 1; playSfx("move"); }
+      if (k === "d" || e.key === "ArrowRight") { selectedChar = 1; playSfx("move"); }
       if (e.key === "Enter" || e.key === " ") { setState("mode"); playSfx("select"); }
       return;
     }
@@ -1620,16 +1659,33 @@
     else { ctx.fillStyle=c.accent; ctx.fillRect(x-150,y-150,300,300); }
     ctx.restore();
 
-    drawPanel(x-165, 30, 330, isLocal ? 212 : 188);
-    drawText(isLocal ? "PLAYER" : (gameMode === "single" ? "AI" : "P2"), x, 58, 23, c.accent);
-    drawText(player.name, x, 88, 29);
-    drawText(String(player.score), x, 135, 46);
-    drawText(`COMBO ${player.combo}`, x, 174, 20);
-    if (isLocal) {
-      drawText(`키보드 ${cpm(player,true)} CPM`, x, 200, 18, "#fff");
-      drawText(`총 동꼽 ${cpm(player,false)} CPM`, x, 222, 18, "#fff0a8");
+    if (gameMode === "online") {
+      const isLeft = isLocal;
+      const roleLabel = isLeft ? "PLAYER" : "P2";
+      drawPanel(x-165, 30, 330, isLeft ? 238 : 218);
+      drawText(roleLabel, x, 56, 22, c.accent);
+      drawText(player.name || (isLeft ? getLocalName() : "상대"), x, 86, 28, "#fff");
+      drawText(`캐릭터: ${c.name}`, x, 116, 18, c.accent);
+      drawText(String(player.score), x, 158, 42);
+      drawText(`COMBO ${player.combo}`, x, 196, 19);
+      if (isLeft) {
+        drawText(`키보드 ${cpm(player,true)} CPM`, x, 221, 17, "#fff");
+        drawText(`총 동꼽 ${cpm(player,false)} CPM`, x, 242, 17, "#fff0a8");
+      } else {
+        drawText(`상대 ${player.remoteCpm || cpm(player,false)} CPM`, x, 224, 17, "#fff");
+      }
     } else {
-      drawText(`${gameMode === "single" ? "AI" : "상대"} ${player.remoteCpm || cpm(player,false)} CPM`, x, 206, 17, "#fff");
+      drawPanel(x-165, 30, 330, isLocal ? 212 : 188);
+      drawText(isLocal ? "PLAYER" : "AI", x, 58, 23, c.accent);
+      drawText(player.name, x, 88, 29);
+      drawText(String(player.score), x, 135, 46);
+      drawText(`COMBO ${player.combo}`, x, 174, 20);
+      if (isLocal) {
+        drawText(`키보드 ${cpm(player,true)} CPM`, x, 200, 18, "#fff");
+        drawText(`총 동꼽 ${cpm(player,false)} CPM`, x, 222, 18, "#fff0a8");
+      } else {
+        drawText(`AI ${player.remoteCpm || cpm(player,false)} CPM`, x, 206, 17, "#fff");
+      }
     }
 
     if (player.starPopup > 0) {
@@ -1793,19 +1849,29 @@
 
   function drawSelectionHighlight() {
     const t = nowSec();
-    const pulse = 0.55 + Math.sin(t * 5) * 0.14;
+    const pulse = 0.52 + Math.sin(t * 5) * 0.12;
+    // 캐릭터 선택 카드의 실제 네온 프레임 중앙에 맞춘 박스
+    // 기존 박스는 좌우로 넓어 화살표와 캐릭터 외곽까지 덮어서 어긋나 보였음
     const box = selectedChar === 0
-      ? {x: 310, y: 92, w: 340, h: 520, fill: "rgba(70,170,255,.22)", stroke: "rgba(120,210,255,.95)"}
-      : {x: 650, y: 92, w: 340, h: 520, fill: "rgba(165,100,45,.25)", stroke: "rgba(238,168,88,.95)"};
+      ? {x: 344, y: 98, w: 306, h: 518, fill: "rgba(70,170,255,.20)", stroke: "rgba(120,210,255,.95)", glow: "rgba(90,205,255,.55)"}
+      : {x: 654, y: 98, w: 306, h: 518, fill: "rgba(165,100,45,.22)", stroke: "rgba(238,168,88,.95)", glow: "rgba(255,185,95,.55)"};
     ctx.save();
     ctx.globalAlpha = pulse;
     ctx.fillStyle = box.fill;
     ctx.strokeStyle = box.stroke;
     ctx.lineWidth = 5;
-    ctx.shadowColor = box.stroke;
-    ctx.shadowBlur = 28;
-    roundRect(box.x, box.y, box.w, box.h, 30);
+    ctx.shadowColor = box.glow;
+    ctx.shadowBlur = 26;
+    roundRect(box.x, box.y, box.w, box.h, 28);
     ctx.fill();
+    ctx.stroke();
+
+    // 안쪽 하이라이트 라인으로 선택감만 살리고 캐릭터는 과하게 가리지 않게 처리
+    ctx.globalAlpha = pulse * 0.65;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255,255,255,.85)";
+    ctx.shadowBlur = 10;
+    roundRect(box.x + 10, box.y + 10, box.w - 20, box.h - 20, 22);
     ctx.stroke();
     ctx.restore();
   }
@@ -1901,7 +1967,7 @@
     } else if (state === "select") {
       drawImageCover(assets.select || assets.bg, 0,0,W,H);
       drawSelectionHighlight();
-      drawText("A / ← : 슈니    F / → : 다시바", W/2, 620, 34, "#fff0a8");
+      drawText("A / ← : 슈니    D / → : 다시바", W/2, 620, 34, "#fff0a8");
       drawText(`현재 선택: ${chars[selectedChar].name}`, W/2, 670, 30, "#fff");
     } else if (state === "mode") {
       drawImageCover(assets.bg,0,0,W,H);
