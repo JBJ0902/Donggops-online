@@ -38,6 +38,7 @@
     intro5: "assets/images/dongggop_intro_5.webp",
     intro6: "assets/images/dongggop_intro_6.webp",
     volumeIcon: "assets/images/volume_icon.png",
+    fullscreenIcon: "assets/images/fullscreen_icon.png",
     select: "assets/images/character_select_screen.webp",
     bg: "assets/images/bg.webp",
     coin: "assets/images/coin.webp",
@@ -732,7 +733,12 @@
   }
 
   function fullscreenButtonRect() {
-    return { id: "fullscreenToggle", x: 18, y: 654, w: 154, h: 46, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
+    if (state === "intro") {
+      return { id: "fullscreenToggle", x: 18, y: 654, w: 154, h: 46, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
+    }
+    // 인트로 이후 화면에서는 우측 하단 BGM 볼륨 아이콘 위에 작은 아이콘으로 표시
+    const mr = menuRect();
+    return { id: "fullscreenToggle", x: mr.x + 28, y: mr.y - 118, w: 48, h: 48, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
   }
 
   function toggleFullscreen() {
@@ -745,24 +751,70 @@
     if (state === "loading" || menuOpen) return;
     const r = fullscreenButtonRect();
     const hovered = inRect(mouse, r);
+    const label = document.fullscreenElement ? "전체화면 해제" : "전체화면";
+
     ctx.save();
-    ctx.fillStyle = hovered ? "rgba(139,223,255,.18)" : "rgba(0,0,0,.40)";
-    ctx.strokeStyle = hovered ? "rgba(190,232,255,.96)" : "rgba(255,255,255,.55)";
-    ctx.lineWidth = hovered ? 2.8 : 1.6;
-    ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
-    ctx.shadowBlur = hovered ? 16 : 0;
-    roundRect(r.x, r.y, r.w, r.h, 15);
-    ctx.fill();
-    ctx.stroke();
-    if (hovered) {
-      ctx.globalAlpha = .18;
-      ctx.fillStyle = "#bfe8ff";
+    if (state === "intro") {
+      ctx.fillStyle = hovered ? "rgba(139,223,255,.18)" : "rgba(0,0,0,.40)";
+      ctx.strokeStyle = hovered ? "rgba(190,232,255,.96)" : "rgba(255,255,255,.55)";
+      ctx.lineWidth = hovered ? 2.8 : 1.6;
+      ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
+      ctx.shadowBlur = hovered ? 16 : 0;
       roundRect(r.x, r.y, r.w, r.h, 15);
       ctx.fill();
+      ctx.stroke();
+      if (hovered) {
+        ctx.globalAlpha = .18;
+        ctx.fillStyle = "#bfe8ff";
+        roundRect(r.x, r.y, r.w, r.h, 15);
+        ctx.fill();
+      }
+      ctx.restore();
+      drawText(label, r.x + r.w / 2, r.y + r.h / 2, 19, hovered ? "#bfe8ff" : "#fff", "center", true);
+      return;
+    }
+
+    // 작은 전체화면 아이콘 버튼
+    ctx.fillStyle = hovered ? "rgba(190,232,255,.22)" : "rgba(0,0,0,.46)";
+    ctx.strokeStyle = hovered ? "rgba(190,232,255,.98)" : "rgba(255,255,255,.55)";
+    ctx.lineWidth = hovered ? 2.4 : 1.4;
+    ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
+    ctx.shadowBlur = hovered ? 16 : 0;
+    roundRect(r.x, r.y, r.w, r.h, 14);
+    ctx.fill();
+    ctx.stroke();
+
+    if (assets.fullscreenIcon) {
+      ctx.globalAlpha = hovered ? 1 : .88;
+      ctx.drawImage(assets.fullscreenIcon, r.x + 9, r.y + 9, r.w - 18, r.h - 18);
+      ctx.globalAlpha = 1;
+    } else {
+      drawText("⛶", r.x + r.w / 2, r.y + r.h / 2, 28, "#ffffff", "center", true);
+    }
+
+    if (hovered) {
+      const bx = Math.max(14, r.x - 190);
+      const by = r.y + 4;
+      const bw = 180;
+      const bh = 40;
+      ctx.fillStyle = "rgba(0,0,0,.58)";
+      ctx.strokeStyle = "rgba(190,232,255,.90)";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "#8bdfff";
+      ctx.shadowBlur = 12;
+      roundRect(bx, by, bw, bh, 14);
+      ctx.fill();
+      ctx.stroke();
+      ctx.globalAlpha = .16;
+      ctx.fillStyle = "#bfe8ff";
+      roundRect(bx, by, bw, bh, 14);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      drawText(label, bx + bw / 2, by + bh / 2, 18, "#e8fbff", "center", true);
+      return;
     }
     ctx.restore();
-    const label = document.fullscreenElement ? "전체화면 해제" : "전체화면";
-    drawText(label, r.x + r.w / 2, r.y + r.h / 2, 19, hovered ? "#bfe8ff" : "#fff", "center", true);
   }
 
   function floatingBgmIconRect() {
