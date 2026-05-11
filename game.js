@@ -160,6 +160,7 @@
   let introFlash = 0;
   let introVolumeDragging = false;
   let menuVolumeDragging = null; // "bgm" | "sfx" - 설정 볼륨바 마우스 드래그
+  let floatingBgmDragging = false; // 타이틀/게임 화면 우측 음악 볼륨 드래그
   let stageCountdownStart = 0;
   let stageCountdownEnd = 0;
 
@@ -730,6 +731,142 @@
     return introVolumeDragging || inRect(p, introVolumeIconRect()) || inRect(p, introVolumeRect());
   }
 
+  function fullscreenButtonRect() {
+    return { id: "fullscreenToggle", x: 18, y: 654, w: 154, h: 46, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
+  }
+
+  function toggleFullscreen() {
+    const target = document.documentElement;
+    if (!document.fullscreenElement && target.requestFullscreen) target.requestFullscreen().catch(()=>{});
+    else if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+  }
+
+  function drawGlobalFullscreenButton() {
+    if (state === "loading" || menuOpen) return;
+    const r = fullscreenButtonRect();
+    const hovered = inRect(mouse, r);
+    ctx.save();
+    ctx.fillStyle = hovered ? "rgba(139,223,255,.18)" : "rgba(0,0,0,.40)";
+    ctx.strokeStyle = hovered ? "rgba(190,232,255,.96)" : "rgba(255,255,255,.55)";
+    ctx.lineWidth = hovered ? 2.8 : 1.6;
+    ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
+    ctx.shadowBlur = hovered ? 16 : 0;
+    roundRect(r.x, r.y, r.w, r.h, 15);
+    ctx.fill();
+    ctx.stroke();
+    if (hovered) {
+      ctx.globalAlpha = .18;
+      ctx.fillStyle = "#bfe8ff";
+      roundRect(r.x, r.y, r.w, r.h, 15);
+      ctx.fill();
+    }
+    ctx.restore();
+    const label = document.fullscreenElement ? "전체화면 해제" : "전체화면";
+    drawText(label, r.x + r.w / 2, r.y + r.h / 2, 19, hovered ? "#bfe8ff" : "#fff", "center", true);
+  }
+
+  function floatingBgmIconRect() {
+    const mr = menuRect();
+    return { id: "floatingBgmIcon", x: mr.x + 24, y: mr.y - 62, w: 56, h: 50, color: "#9cffb0", label: "BGM 볼륨" };
+  }
+
+  function floatingBgmPanelRect() {
+    const icon = floatingBgmIconRect();
+    return { id: "floatingBgmPanel", x: icon.x - 236, y: icon.y - 2, w: 296, h: 54, color: "#9cffb0", label: "BGM 볼륨" };
+  }
+
+  function floatingBgmSliderRect() {
+    const panel = floatingBgmPanelRect();
+    return { id: "floatingBgmSlider", x: panel.x + 62, y: panel.y + 20, w: 165, h: 14, color: "#9cffb0", label: "BGM 볼륨" };
+  }
+
+  function floatingBgmSliderHitRect() {
+    const r = floatingBgmSliderRect();
+    return { ...r, x: r.x - 12, y: r.y - 14, w: r.w + 24, h: r.h + 28 };
+  }
+
+  function floatingBgmVisibleInState() {
+    return !menuOpen && (state === "title" || state === "playing" || state === "stageCountdown" || state === "onlineCountdown");
+  }
+
+  function floatingBgmOpen(p=mouse) {
+    if (!floatingBgmVisibleInState()) return false;
+    return floatingBgmDragging || inRect(p, floatingBgmIconRect()) || inRect(p, floatingBgmPanelRect());
+  }
+
+  function setFloatingBgmVolumeFromX(x) {
+    const r = floatingBgmSliderRect();
+    bgmVolume = Math.max(0, Math.min(1, (x - r.x) / r.w));
+    bgmMuted = false;
+    applyVolumes();
+    saveSettings();
+  }
+
+  function drawFloatingBgmVolumeControl() {
+    if (!floatingBgmVisibleInState()) return;
+    const icon = floatingBgmIconRect();
+    const panel = floatingBgmPanelRect();
+    const slider = floatingBgmSliderRect();
+    const open = floatingBgmOpen();
+    const hoveredIcon = inRect(mouse, icon);
+
+    ctx.save();
+    if (open) {
+      ctx.fillStyle = "rgba(0,0,0,.52)";
+      ctx.strokeStyle = "rgba(156,255,176,.92)";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "#9cffb0";
+      ctx.shadowBlur = 15;
+      roundRect(panel.x, panel.y, panel.w, panel.h, 18);
+      ctx.fill();
+      ctx.stroke();
+
+      if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, panel.x + 12, panel.y + 8, 38, 38);
+      else drawText("🔊", panel.x + 32, panel.y + 27, 22, "#fff", "center", false);
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,255,255,.17)";
+      roundRect(slider.x, slider.y, slider.w, slider.h, 7);
+      ctx.fill();
+      const fillW = slider.w * bgmEffectiveVolume();
+      if (fillW > 1) {
+        ctx.shadowColor = "#9cffb0";
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = "#9cffb0";
+        roundRect(slider.x, slider.y, Math.max(slider.h, fillW), slider.h, 7);
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,.72)";
+      ctx.lineWidth = 2;
+      roundRect(slider.x, slider.y, slider.w, slider.h, 7);
+      ctx.stroke();
+      const knobX = slider.x + slider.w * bgmEffectiveVolume();
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#9cffb0";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "#9cffb0";
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(knobX, slider.y + slider.h / 2, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      drawText(`${Math.round(bgmEffectiveVolume() * 100)}%`, panel.x + panel.w - 28, panel.y + panel.h / 2, 16, "#fff0a8", "center", true);
+    } else {
+      ctx.fillStyle = hoveredIcon ? "rgba(156,255,176,.18)" : "rgba(0,0,0,.42)";
+      ctx.strokeStyle = hoveredIcon ? "rgba(156,255,176,.95)" : "rgba(255,255,255,.55)";
+      ctx.lineWidth = hoveredIcon ? 2.6 : 1.5;
+      ctx.shadowColor = hoveredIcon ? "#9cffb0" : "transparent";
+      ctx.shadowBlur = hoveredIcon ? 14 : 0;
+      roundRect(icon.x, icon.y, icon.w, icon.h, 16);
+      ctx.fill();
+      ctx.stroke();
+      if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, icon.x + 10, icon.y + 7, 36, 36);
+      else drawText("🔊", icon.x + icon.w/2, icon.y + icon.h/2, 24, "#fff", "center", false);
+    }
+    ctx.restore();
+  }
+
   function setIntroVolumeFromX(x) {
     const r = introVolumeSliderRect();
     bgmVolume = Math.max(0, Math.min(1, (x - r.x) / r.w));
@@ -974,8 +1111,11 @@
       if (inRect(mouse, introSkipRect())) return introSkipRect();
       if (introVolumeOpen()) return introVolumeIconRect();
       if (inRect(mouse, introNextRect())) return introNextRect();
+      if (inRect(mouse, fullscreenButtonRect())) return fullscreenButtonRect();
       return null;
     }
+    if (floatingBgmOpen()) return floatingBgmIconRect();
+    if (inRect(mouse, fullscreenButtonRect())) return fullscreenButtonRect();
     if (state === "title") {
       const sr = titleStartRect();
       if (inRect(mouse, sr)) return sr;
@@ -1482,6 +1622,8 @@
       handleMenuClick(p.x, p.y);
       return;
     }
+    if (floatingBgmOpen(p) && inRect(p, floatingBgmSliderRect())) { setFloatingBgmVolumeFromX(p.x); return; }
+    if (inRect(p, fullscreenButtonRect())) { toggleFullscreen(); return; }
     if (state === "intro") {
       if (inRect(p, introSkipRect())) { goTitleFromIntro(); return; }
       if (introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) { setIntroVolumeFromX(p.x); return; }
@@ -1531,6 +1673,13 @@
         return;
       }
     }
+    if (floatingBgmOpen(p) && inRect(p, floatingBgmSliderHitRect())) {
+      unlockAudio();
+      floatingBgmDragging = true;
+      setFloatingBgmVolumeFromX(p.x);
+      evt.preventDefault();
+      return;
+    }
     if (state === "intro" && introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) {
       unlockAudio();
       introVolumeDragging = true;
@@ -1547,6 +1696,11 @@
       evt.preventDefault();
       return;
     }
+    if (floatingBgmDragging) {
+      setFloatingBgmVolumeFromX(p.x);
+      evt.preventDefault();
+      return;
+    }
     if (!introVolumeDragging) return;
     setIntroVolumeFromX(p.x);
   });
@@ -1554,6 +1708,7 @@
   window.addEventListener("pointerup", () => {
     if (menuVolumeDragging === "sfx") playSfx("coin", .45);
     introVolumeDragging = false;
+    floatingBgmDragging = false;
     menuVolumeDragging = null;
   });
 
@@ -1565,6 +1720,7 @@
   canvas.addEventListener("mouseleave", () => {
     mouse = { x: -999, y: -999 };
     introVolumeDragging = false;
+    floatingBgmDragging = false;
     menuVolumeDragging = null;
     canvas.style.cursor = "default";
   });
@@ -2743,6 +2899,8 @@
     } else if (state === "final") {
       drawFinal();
     }
+    drawFloatingBgmVolumeControl();
+    drawGlobalFullscreenButton();
     drawMenuIcon();
     if (menuOpen) drawMenuOverlay();
     requestAnimationFrame(loop);
