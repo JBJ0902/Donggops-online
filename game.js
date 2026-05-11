@@ -2097,6 +2097,60 @@
     ctx.restore();
   }
 
+  function drawHudSignalBox(x, y, w, h, type="star", phase=0) {
+    const isStar = type === "star";
+    const pulse = 0.5 + 0.5 * Math.sin(phase * 7.5);
+    ctx.save();
+    ctx.globalAlpha = 0.68 + pulse * 0.18;
+    ctx.shadowColor = isStar ? "#ff8ee4" : "#8bdfff";
+    ctx.shadowBlur = 12 + pulse * 10;
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    if (isStar) {
+      g.addColorStop(0, "rgba(255,142,228,.34)");
+      g.addColorStop(.55, "rgba(255,240,168,.22)");
+      g.addColorStop(1, "rgba(139,223,255,.20)");
+    } else {
+      g.addColorStop(0, "rgba(139,223,255,.30)");
+      g.addColorStop(.55, "rgba(255,240,168,.24)");
+      g.addColorStop(1, "rgba(191,255,224,.20)");
+    }
+    ctx.fillStyle = g;
+    roundRect(x, y, w, h, 15);
+    ctx.fill();
+    ctx.strokeStyle = isStar ? "rgba(255,240,168,.86)" : "rgba(139,223,255,.88)";
+    ctx.lineWidth = 2;
+    roundRect(x, y, w, h, 15);
+    ctx.stroke();
+
+    // 가벼운 스캔라인: 파티클을 만들지 않고 박스 안에서만 움직여 렉을 줄임
+    ctx.globalAlpha = 0.24 + pulse * 0.20;
+    ctx.fillStyle = "#ffffff";
+    const scanX = x + 10 + ((phase * 86) % Math.max(1, w - 34));
+    roundRect(scanX, y + 5, 24, h - 10, 10);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMiniHudSparkles(x, y, w, h, phase=0, type="star") {
+    const colors = type === "star"
+      ? ["#fff0a8", "#ff8ee4", "#8bdfff"]
+      : ["#fff0a8", "#8bdfff", "#bfffe0"];
+    ctx.save();
+    ctx.font = "800 14px Malgun Gothic, Apple SD Gothic Neo, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let i=0; i<5; i++) {
+      const sx = x + 18 + ((phase * 38 + i * (w / 4.4)) % Math.max(1, w - 36));
+      const sy = y + 8 + (i % 2) * (h - 16) + Math.sin(phase * 5 + i) * 2.2;
+      ctx.globalAlpha = 0.45 + 0.45 * Math.max(0, Math.sin(phase * 7 + i));
+      ctx.shadowColor = colors[i % colors.length];
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillText(i % 2 ? "✦" : "★", sx, sy);
+    }
+    ctx.restore();
+  }
+
   function frameFor(player) {
     const c = chars[player.char];
     if (player.donggopBuffs && player.donggopBuffs.length > 0) {
@@ -2218,12 +2272,41 @@
     drawText(gameMode === "single" ? `난이도 ${STAGES[stageIndex].rank}` : `${getLocalName()} vs ${remote ? remote.name : "상대"}`, W/2, 114, 22, "#fff");
 
     drawPanel(220, 590, 840, 128);
-    const bStatus = local.fUnlocked
-      ? `별풍선 터짐(B활성) ${local.fTimer.toFixed(1)}s`
+    const tHud = nowSec();
+    const starActive = !!local.fUnlocked;
+    const autoFull = local.donggopItems >= 5;
+    const bStatus = starActive
+      ? `별풍선 터짐(${keyLabel(keyConfig.star)}키 활성) ${local.fTimer.toFixed(1)}s`
       : local.fCooldown > 0
-        ? `별풍선 안터짐(B쿨 ${local.fCooldown.toFixed(1)}s)`
-        : "별풍선 안터짐(B잠김)";
-    drawText(`${keyLabel(keyConfig.hit)}: 동꼽   ${keyLabel(keyConfig.star)}(별풍선): ${bStatus}   ${keyLabel(keyConfig.auto)}: 동꼽(자동사냥) x${local.donggopItems}/5`, W/2, 611, 17, "#fff");
+        ? `별풍선 안터짐(${keyLabel(keyConfig.star)}쿨 ${local.fCooldown.toFixed(1)}s)`
+        : `별풍선 안터짐(${keyLabel(keyConfig.star)}잠김)`;
+
+    // 상단 조작 안내는 3구역으로 나눠 그려서 긴 문구가 서로 겹치지 않게 유지
+    drawText(`${keyLabel(keyConfig.hit)}: 동꼽`, 305, 611, 16, "#ffffff");
+
+    const starBox = { x: 392, y: 594, w: 430, h: 32 };
+    if (starActive) {
+      drawHudSignalBox(starBox.x, starBox.y, starBox.w, starBox.h, "star", tHud);
+    }
+    const starPalette = ["#fff0a8", "#ff8ee4", "#8bdfff", "#ffffff"];
+    const starColor = starActive ? starPalette[Math.floor(tHud * 7) % starPalette.length] : "#ffffff";
+    drawText(`${keyLabel(keyConfig.star)}(별풍선): ${bStatus}`, starBox.x + starBox.w / 2, 611, starActive ? 15 : 15, starColor);
+    if (starActive) {
+      drawMiniHudSparkles(starBox.x, starBox.y, starBox.w, starBox.h, tHud, "star");
+      drawText("USE!", starBox.x + starBox.w - 34, starBox.y - 6, 13, "#fff0a8");
+    }
+
+    const autoBox = { x: 835, y: 594, w: 215, h: 32 };
+    if (autoFull) {
+      drawHudSignalBox(autoBox.x, autoBox.y, autoBox.w, autoBox.h, "auto", tHud + 0.37);
+    }
+    const autoPalette = ["#fff0a8", "#8bdfff", "#ffffff", "#ffd6ff"];
+    const autoColor = autoFull ? autoPalette[Math.floor(tHud * 6) % autoPalette.length] : (local.donggopItems > 0 ? "#ffe5a8" : "#ffffff");
+    drawText(`${keyLabel(keyConfig.auto)}: 동꼽(자동사냥) x${local.donggopItems}/5`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
+    if (autoFull) {
+      drawMiniHudSparkles(autoBox.x, autoBox.y, autoBox.w, autoBox.h, tHud + 0.61, "auto");
+      drawText("READY!", autoBox.x + autoBox.w - 40, autoBox.y - 6, 13, "#bfffe0");
+    }
 
     const manual = cpm(local, true);
     const cpmRatio = Math.max(0, Math.min(1, manual / STAR_THRESHOLD));
