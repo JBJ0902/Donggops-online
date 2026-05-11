@@ -159,6 +159,8 @@
   let introIndex = 0;
   let introFlash = 0;
   let introVolumeDragging = false;
+  let stageCountdownStart = 0;
+  let stageCountdownEnd = 0;
 
   const ONLINE_DURATIONS = [120, 180, 240, 300];
   const ONLINE_BGM_OPTIONS = [
@@ -298,6 +300,7 @@
     else if (state === "title") playBgm("titleBgm");
     else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
+    else if (state === "stageCountdown") playBgm(`stage${stageIndex + 1}`);
     else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${stageIndex + 1}`);
     else if (state === "ending" || state === "final") playBgm("endingBgm");
     else stopBgm();
@@ -640,16 +643,28 @@
     return { id: "finalNext", x: 420, y: 580, w: 440, h: 58, color: "#bfe8ff", label: "초기화면" };
   }
 
+  function introNextRect() {
+    return { id: "introNext", x: 500, y: 518, w: 280, h: 48, color: "#fff0a8", label: "다음" };
+  }
+
   function introSkipRect() {
     return { id: "introSkip", x: 1136, y: 646, w: 112, h: 48, color: "#fff0a8", label: "SKIP" };
   }
 
+  function introVolumeIconRect() {
+    return { id: "introVolumeIcon", x: 1160, y: 584, w: 50, h: 50, color: "#bfe8ff", label: "볼륨" };
+  }
+
   function introVolumeRect() {
-    return { id: "introVolume", x: 1012, y: 584, w: 230, h: 52, color: "#bfe8ff", label: "볼륨" };
+    return { id: "introVolume", x: 972, y: 582, w: 248, h: 56, color: "#bfe8ff", label: "볼륨" };
   }
 
   function introVolumeSliderRect() {
-    return { id: "introVolumeSlider", x: 1088, y: 603, w: 130, h: 14, color: "#9cffb0", label: "볼륨" };
+    return { id: "introVolumeSlider", x: 1038, y: 603, w: 135, h: 14, color: "#9cffb0", label: "볼륨" };
+  }
+
+  function introVolumeOpen(p=mouse) {
+    return introVolumeDragging || inRect(p, introVolumeIconRect()) || inRect(p, introVolumeRect());
   }
 
   function setIntroVolumeFromX(x) {
@@ -702,56 +717,89 @@
   }
 
   function drawIntroControls() {
+    const next = introNextRect();
     const skip = introSkipRect();
+    const icon = introVolumeIconRect();
     const vol = introVolumeRect();
     const slider = introVolumeSliderRect();
+    const volOpen = introVolumeOpen();
+
+    if (inRect(mouse, next)) drawHoverSelectBox(next, 0.18);
     if (inRect(mouse, skip)) drawHoverSelectBox(skip, 0.18);
-    if (inRect(mouse, vol)) {
-      ctx.save();
-      ctx.globalAlpha = .16;
-      ctx.fillStyle = "#bfe8ff";
+
+    // 다음 버튼: 스토리 하단 자막과 겹치지 않도록 화면 중앙 하단 위쪽에 배치
+    ctx.save();
+    ctx.fillStyle = inRect(mouse, next) ? "rgba(255,240,168,.18)" : "rgba(0,0,0,.36)";
+    ctx.strokeStyle = inRect(mouse, next) ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.50)";
+    ctx.lineWidth = inRect(mouse, next) ? 2.8 : 1.6;
+    ctx.shadowColor = inRect(mouse, next) ? "#fff0a8" : "transparent";
+    ctx.shadowBlur = inRect(mouse, next) ? 18 : 0;
+    roundRect(next.x, next.y, next.w, next.h, 18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText("CLICK : 다음", next.x + next.w/2, next.y + next.h/2, 22, "#fff0a8", "center", true);
+
+    // SKIP 버튼
+    ctx.save();
+    ctx.fillStyle = inRect(mouse, skip) ? "rgba(255,240,168,.18)" : "rgba(0,0,0,.42)";
+    ctx.strokeStyle = inRect(mouse, skip) ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.55)";
+    ctx.lineWidth = inRect(mouse, skip) ? 2.8 : 1.5;
+    roundRect(skip.x, skip.y, skip.w, skip.h, 16);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText("SKIP", skip.x + skip.w/2, skip.y + skip.h/2, 21, inRect(mouse, skip) ? "#fff0a8" : "#fff", "center", true);
+
+    // 볼륨: 평소에는 아이콘만 표시, 마우스를 올리면 슬라이더가 펼쳐짐
+    ctx.save();
+    if (volOpen) {
+      ctx.fillStyle = "rgba(0,0,0,.50)";
+      ctx.strokeStyle = "rgba(190,232,255,.92)";
+      ctx.lineWidth = 2;
+      ctx.shadowColor = "#8bdfff";
+      ctx.shadowBlur = 16;
       roundRect(vol.x, vol.y, vol.w, vol.h, 18);
       ctx.fill();
-      ctx.restore();
-    }
+      ctx.stroke();
 
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,.46)";
-    ctx.strokeStyle = inRect(mouse, vol) ? "rgba(190,232,255,.95)" : "rgba(255,255,255,.55)";
-    ctx.lineWidth = inRect(mouse, vol) ? 2.5 : 1.5;
-    roundRect(vol.x, vol.y, vol.w, vol.h, 18);
-    ctx.fill();
-    ctx.stroke();
-    if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, vol.x + 11, vol.y + 6, 40, 40);
-    else drawText("🔊", vol.x + 32, vol.y + 26, 25, "#fff", "center", false);
+      if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, vol.x + 10, vol.y + 8, 38, 38);
+      else drawText("🔊", vol.x + 29, vol.y + 28, 23, "#fff", "center", false);
 
-    ctx.fillStyle = "rgba(255,255,255,.18)";
-    roundRect(slider.x, slider.y, slider.w, slider.h, 7);
-    ctx.fill();
-    const vw = slider.w * bgmEffectiveVolume();
-    if (vw > 1) {
-      ctx.shadowColor = "#9cffb0";
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = "#9cffb0";
-      roundRect(slider.x, slider.y, Math.max(slider.h, vw), slider.h, 7);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,255,255,.18)";
+      roundRect(slider.x, slider.y, slider.w, slider.h, 7);
       ctx.fill();
+      const vw = slider.w * bgmEffectiveVolume();
+      if (vw > 1) {
+        ctx.shadowColor = "#9cffb0";
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = "#9cffb0";
+        roundRect(slider.x, slider.y, Math.max(slider.h, vw), slider.h, 7);
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,.70)";
+      ctx.lineWidth = 2;
+      roundRect(slider.x, slider.y, slider.w, slider.h, 7);
+      ctx.stroke();
+      const knobX = slider.x + slider.w * bgmEffectiveVolume();
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(knobX, slider.y + slider.h / 2, 9, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "rgba(0,0,0,.42)";
+      ctx.strokeStyle = "rgba(255,255,255,.55)";
+      ctx.lineWidth = 1.5;
+      roundRect(icon.x, icon.y, icon.w, icon.h, 16);
+      ctx.fill();
+      ctx.stroke();
+      if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, icon.x + 7, icon.y + 7, 36, 36);
+      else drawText("🔊", icon.x + icon.w/2, icon.y + icon.h/2, 24, "#fff", "center", false);
     }
-    ctx.strokeStyle = "rgba(255,255,255,.70)";
-    ctx.lineWidth = 2;
-    roundRect(slider.x, slider.y, slider.w, slider.h, 7);
-    ctx.stroke();
-    const knobX = slider.x + slider.w * bgmEffectiveVolume();
-    ctx.fillStyle = "#ffffff";
-    ctx.shadowColor = "#ffffff";
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(knobX, slider.y + slider.h / 2, 9, 0, Math.PI * 2);
-    ctx.fill();
     ctx.restore();
-
-    drawText("SKIP", skip.x + skip.w/2, skip.y + skip.h/2, 21, inRect(mouse, skip) ? "#fff0a8" : "#fff", "center", true);
-    drawText("ENTER / SPACE / CLICK : 다음", W/2, 686, 23, "#fff0a8", "center", true);
-    drawText(`${introIndex + 1} / 6`, 62, 682, 20, "#bfe8ff", "left", true);
   }
 
   function drawIntroScreen() {
@@ -855,8 +903,9 @@
     }
     if (state === "intro") {
       if (inRect(mouse, introSkipRect())) return introSkipRect();
-      if (inRect(mouse, introVolumeRect())) return introVolumeRect();
-      return { id: "introNext", x: 0, y: 0, w: W, h: H, color: "#fff0a8", label: "다음" };
+      if (introVolumeOpen()) return introVolumeIconRect();
+      if (inRect(mouse, introNextRect())) return introNextRect();
+      return null;
     }
     if (state === "title") {
       const sr = titleStartRect();
@@ -1360,8 +1409,8 @@
     }
     if (state === "intro") {
       if (inRect(p, introSkipRect())) { goTitleFromIntro(); return; }
-      if (inRect(p, introVolumeRect())) { setIntroVolumeFromX(p.x); return; }
-      nextIntroScene();
+      if (introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) { setIntroVolumeFromX(p.x); return; }
+      if (inRect(p, introNextRect())) { nextIntroScene(); return; }
       return;
     }
     if (state === "title") {
@@ -1397,7 +1446,7 @@
 
   canvas.addEventListener("pointerdown", (evt) => {
     const p = canvasPoint(evt);
-    if (state === "intro" && inRect(p, introVolumeRect())) {
+    if (state === "intro" && introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) {
       unlockAudio();
       introVolumeDragging = true;
       setIntroVolumeFromX(p.x);
@@ -1455,10 +1504,23 @@
     aiSurge = 0;
     aiCatchupActive = false;
     result = null;
+
+    if (gameMode === "single") {
+      stageCountdownStart = nowSec();
+      stageCountdownEnd = stageCountdownStart + 3.6;
+      setState("stageCountdown");
+      return;
+    }
+
+    beginStagePlay(broadcast);
+  }
+
+  function beginStagePlay(broadcast=true) {
     stageStart = nowSec();
     setState("playing");
-    addText(W/2, 170, `${STAGES[idx].name} 시작!`, "#fff0a8", 42, 1.3);
-    if (gameMode === "online" && broadcast) sendMsg({ type: "stage_start", stage: idx });
+    const stageName = gameMode === "online" ? "ONLINE 1:1 대전" : STAGES[stageIndex].name;
+    addText(W/2, 170, `${stageName} 시작!`, "#fff0a8", 42, 1.3);
+    if (gameMode === "online" && broadcast) sendMsg({ type: "stage_start", stage: stageIndex });
   }
 
   function finishStage() {
@@ -1876,7 +1938,7 @@
       if (e.key === "Enter") setOnlineReady(!onlineLocalReady);
       return;
     }
-    if (state === "onlineCountdown") return;
+    if (state === "onlineCountdown" || state === "stageCountdown") return;
     if (state === "intro" && (e.key === "Enter" || e.key === " ")) {
       nextIntroScene();
       return;
@@ -1930,7 +1992,7 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "intro" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
+    if (state === "intro" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
@@ -1939,6 +2001,10 @@
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
     if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
       startOnlineMatch();
+      return;
+    }
+    if (state === "stageCountdown" && stageCountdownEnd > 0 && nowSec() >= stageCountdownEnd) {
+      beginStagePlay();
       return;
     }
     if (menuOpen) return;
@@ -2100,6 +2166,47 @@
       drawText("별풍선 발동!", x, y-250, 36, "#fff0a8");
       ctx.restore();
     }
+  }
+
+  function drawStageCountdown() {
+    drawImageCover(assets.bg,0,0,W,H);
+    ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.fillRect(0,0,W,H);
+    if (local && remote) {
+      drawPlayer(local, 330, 410, true);
+      drawPlayer(remote, 950, 410, false);
+      ctx.strokeStyle = "rgba(255,255,255,.5)";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(W/2,190); ctx.lineTo(W/2,520); ctx.stroke();
+    }
+    drawText(`${STAGES[stageIndex].name} / AI 대전`, W/2, 42, 34, "#fff");
+    drawText(`난이도 ${STAGES[stageIndex].rank}`, W/2, 88, 24, "#fff0a8");
+
+    const elapsed = Math.max(0, nowSec() - stageCountdownStart);
+    let msg = "게임시작 3초전";
+    if (elapsed >= 1 && elapsed < 2) msg = "게임시작 2초전";
+    else if (elapsed >= 2 && elapsed < 3) msg = "게임시작 1초전";
+    else if (elapsed >= 3) msg = "게임 시작!";
+
+    const pulse = 1 + Math.sin(nowSec() * 9) * 0.035;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.66)";
+    ctx.strokeStyle = "rgba(255,240,168,.92)";
+    ctx.lineWidth = 3;
+    ctx.shadowColor = "#fff0a8";
+    ctx.shadowBlur = 28;
+    roundRect(315, 245, 650, 190, 30);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W/2, 340);
+    ctx.scale(pulse, pulse);
+    drawText(msg, 0, 0, elapsed >= 3 ? 58 : 52, elapsed >= 3 ? "#bfffe0" : "#fff0a8", "center", true);
+    ctx.restore();
+    drawText("준비하세요!", W/2, 405, 28, "#bfe8ff");
+
+    drawParticles();
   }
 
   function drawHUD() {
@@ -2396,6 +2503,8 @@
       drawOnlineLobby();
     } else if (state === "onlineCountdown") {
       drawOnlineCountdown();
+    } else if (state === "stageCountdown") {
+      drawStageCountdown();
     } else if (state === "playing") {
       drawImageCover(assets.bg,0,0,W,H);
       ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(0,0,W,H);
