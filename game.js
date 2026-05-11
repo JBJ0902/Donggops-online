@@ -572,13 +572,20 @@
   }
 
   function drawVolumeBar(x, y, w, h, ratio, color) {
+    const v = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const fillW = w * v;
     ctx.save();
     ctx.fillStyle = "rgba(255,255,255,.15)";
     roundRect(x, y, w, h, 10);
     ctx.fill();
-    ctx.fillStyle = color;
-    roundRect(x, y, w * Math.max(0, Math.min(1, ratio)), h, 10);
-    ctx.fill();
+
+    // 0%일 때는 컬러 게이지를 아예 그리지 않아 왼쪽에서 뒤로 꺾여 보이는 잔상 버그를 방지합니다.
+    if (fillW > 1) {
+      ctx.fillStyle = color;
+      roundRect(x, y, fillW, h, Math.min(10, fillW / 2, h / 2));
+      ctx.fill();
+    }
+
     ctx.strokeStyle = "rgba(255,255,255,.65)";
     ctx.lineWidth = 2;
     roundRect(x, y, w, h, 10);
