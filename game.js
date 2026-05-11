@@ -54,6 +54,8 @@
     shuniLose: "assets/images/shuni_lose.webp",
     dashibaWin: "assets/images/dashiba_win.webp",
     dashibaLose: "assets/images/dashiba_lose.webp",
+    shuniSelect: "assets/images/shuni_select.webp",
+    dashibaSelect: "assets/images/dashiba_select.webp",
     starIcon: "assets/images/star_balloon.webp",
     donggopIcon: "assets/images/excuse_icon.webp",
     enterKey: "assets/images/enter_key.webp",
@@ -446,16 +448,26 @@
   }
 
   function menuButton(id, x, y, w, h, label, fill="#16162c") {
-    menuButtons.push({id, x, y, w, h});
+    const rect = {id, x, y, w, h};
+    menuButtons.push(rect);
+    const hovered = inRect(mouse, rect);
     ctx.save();
     ctx.fillStyle = fill;
-    ctx.strokeStyle = "rgba(255,255,255,.82)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = hovered ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.82)";
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.shadowColor = hovered ? "rgba(255,220,120,.85)" : "transparent";
+    ctx.shadowBlur = hovered ? 18 : 0;
     roundRect(x, y, w, h, 14);
     ctx.fill();
     ctx.stroke();
+    if (hovered) {
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = "#fff0a8";
+      roundRect(x, y, w, h, 14);
+      ctx.fill();
+    }
     ctx.restore();
-    drawText(label, x + w/2, y + h/2, 21, "#fff", "center", true);
+    drawText(label, x + w/2, y + h/2, hovered ? 22 : 21, hovered ? "#fff0a8" : "#fff", "center", true);
   }
 
   function menuRect() {
@@ -470,12 +482,21 @@
     const onlineActive = (gameMode === "online" || role === "host" || role === "guest") && (state === "playing" || state === "onlineCountdown");
     const label = onlineActive ? "LOBBY" : "MENU";
     ctx.save();
+    const hovered = inRect(mouse, {x,y,w,h});
     ctx.fillStyle = "rgba(0,0,0,.58)";
-    ctx.strokeStyle = "rgba(255,255,255,.8)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = hovered ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.8)";
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.shadowColor = hovered ? "rgba(255,220,120,.75)" : "transparent";
+    ctx.shadowBlur = hovered ? 14 : 0;
     roundRect(x, y, w, h, 15);
     ctx.fill();
     ctx.stroke();
+    if (hovered) {
+      ctx.globalAlpha = .20;
+      ctx.fillStyle = "#fff0a8";
+      roundRect(x, y, w, h, 15);
+      ctx.fill();
+    }
     ctx.restore();
     drawText(label, x + w/2, y + h/2, label === "LOBBY" ? 18 : 20, "#fff0a8", "center", true);
   }
@@ -570,6 +591,124 @@
     return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   }
 
+  function titleStartRect() {
+    return { id: "titleStart", x: 360, y: 560, w: 560, h: 132, color: "#fff0a8", label: "게임 시작" };
+  }
+
+  function modeOptionRects() {
+    return [
+      { id: "single", x: 315, y: 337, w: 650, h: 52, color: "#8bdfff", label: "싱글 플레이 AI 대전" },
+      { id: "online", x: 360, y: 395, w: 560, h: 54, color: "#ffd6ff", label: "ONLINE 1:1 대전" },
+    ];
+  }
+
+  function selectChoiceRects() {
+    return [
+      { id: "shuniChoice", char: 0, x: 342, y: 86, w: 314, h: 548, color: "#65b5ff", label: "슈니 선택" },
+      { id: "dashibaChoice", char: 1, x: 650, y: 86, w: 314, h: 548, color: "#d79a55", label: "다시바 선택" },
+    ];
+  }
+
+  function resultNextRect() {
+    return { id: "resultNext", x: 420, y: 612, w: 440, h: 58, color: "#fff0a8", label: "다음 진행" };
+  }
+
+  function endingNextRect() {
+    return { id: "endingNext", x: 405, y: 626, w: 470, h: 58, color: "#bfe8ff", label: "최종 결과" };
+  }
+
+  function finalNextRect() {
+    return { id: "finalNext", x: 420, y: 580, w: 440, h: 58, color: "#bfe8ff", label: "초기화면" };
+  }
+
+  function drawHoverSelectBox(r, alpha=0.22) {
+    const t = nowSec();
+    const pulse = alpha + 0.06 * Math.sin(t * 6);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.12, pulse);
+    ctx.fillStyle = r.color || "#ffffff";
+    ctx.shadowColor = r.color || "#ffffff";
+    ctx.shadowBlur = 26;
+    roundRect(r.x, r.y, r.w, r.h, 18);
+    ctx.fill();
+    ctx.globalAlpha = 0.82;
+    ctx.strokeStyle = r.color || "#ffffff";
+    ctx.lineWidth = 3;
+    roundRect(r.x, r.y, r.w, r.h, 18);
+    ctx.stroke();
+    ctx.globalAlpha = 0.58;
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 1.5;
+    roundRect(r.x + 7, r.y + 7, r.w - 14, r.h - 14, 14);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawSmallVfxAroundRect(r, color) {
+    const t = nowSec();
+    ctx.save();
+    for (let i=0; i<8; i++) {
+      const px = r.x + 18 + ((t * 42 + i * 71) % Math.max(20, r.w - 36));
+      const py = r.y + 18 + ((i * 59 + Math.sin(t * 1.7 + i) * 18) % Math.max(20, r.h - 36));
+      ctx.globalAlpha = 0.42 + 0.22 * Math.sin(t * 3 + i);
+      ctx.fillStyle = [color, "#ffffff", "#fff0a8"][i % 3];
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 12;
+      drawStar(px, py, 4 + (i % 3) * 1.8, t * 65 + i * 27);
+    }
+    ctx.restore();
+  }
+
+  function currentSelectVisualChar() {
+    if (state !== "select") return selectedChar;
+    const h = selectChoiceRects().find(r => inRect(mouse, r));
+    return h ? h.char : selectedChar;
+  }
+
+  function drawSelectPopout() {
+    const idx = currentSelectVisualChar();
+    const r = selectChoiceRects()[idx];
+    const key = idx === 0 ? "shuniSelect" : "dashibaSelect";
+    const img = assets[key];
+    if (!r) return;
+    ctx.save();
+    ctx.shadowColor = r.color;
+    ctx.shadowBlur = 24;
+    ctx.globalAlpha = 0.90;
+    // 선택 캐릭터만 카드 위치에서 살짝 확대되어 튀어나오는 느낌.
+    drawImageCover(img, r.x - 10, r.y - 12, r.w + 20, r.h + 20);
+    ctx.restore();
+    drawHoverSelectBox(r, 0.16);
+    drawSmallVfxAroundRect(r, r.color);
+    drawText(idx === 0 ? "슈니 선택" : "다시바 선택", r.x + r.w/2, r.y + 28, 20, r.color, "center", true);
+  }
+
+  function hoveredInteractiveRect() {
+    const mr = menuRect();
+    if (menuOpen) {
+      const b = menuButtons.find(v => inRect(mouse, v));
+      return b ? { ...b, color: "#fff0a8" } : null;
+    }
+    if (state === "title") {
+      const sr = titleStartRect();
+      if (inRect(mouse, sr)) return sr;
+      return getTitleHotspot(mouse);
+    }
+    if (state === "select") return selectChoiceRects().find(r => inRect(mouse, r)) || null;
+    if (state === "mode") return modeOptionRects().find(r => inRect(mouse, r)) || null;
+    if (state === "result") return inRect(mouse, resultNextRect()) ? resultNextRect() : null;
+    if (state === "ending") return inRect(mouse, endingNextRect()) ? endingNextRect() : null;
+    if (state === "final") return inRect(mouse, finalNextRect()) ? finalNextRect() : null;
+    if (state === "onlineLobby") {
+      const b = onlineLobbyButtons.find(v => !v.disabled && inRect(mouse, v));
+      if (b) return { ...b, color: "#fff0a8" };
+    }
+    if (!menuOpen && mouse.x >= mr.x && mouse.x <= mr.x + mr.w && mouse.y >= mr.y && mouse.y <= mr.y + mr.h) {
+      return { ...mr, color: "#fff0a8", label: "MENU" };
+    }
+    return null;
+  }
+
   function titleHotspots() {
     return [
       {
@@ -598,6 +737,7 @@
 
   function getTitleHotspot(pt) {
     if (state !== "title") return null;
+    if (inRect(pt, titleStartRect())) return null;
     // 겹치는 영역에서는 캐릭터 우선순위가 더 자연스럽게 동작하도록 처리
     const links = titleHotspots();
     for (const id of ["dashiba", "shuni", "bubblelan"]) {
@@ -826,17 +966,27 @@
   }
 
   function lobbyButton(id, x, y, w, h, label, fill="#24154f", disabled=false) {
-    onlineLobbyButtons.push({ id, x, y, w, h, disabled });
+    const rect = { id, x, y, w, h, disabled };
+    onlineLobbyButtons.push(rect);
+    const hovered = !disabled && inRect(mouse, rect);
     ctx.save();
     ctx.globalAlpha = disabled ? .45 : 1;
     ctx.fillStyle = fill;
-    ctx.strokeStyle = disabled ? "rgba(255,255,255,.35)" : "rgba(255,255,255,.82)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = disabled ? "rgba(255,255,255,.35)" : (hovered ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.82)");
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.shadowColor = hovered ? "rgba(255,220,120,.7)" : "transparent";
+    ctx.shadowBlur = hovered ? 14 : 0;
     roundRect(x, y, w, h, 14);
     ctx.fill();
     ctx.stroke();
+    if (hovered) {
+      ctx.globalAlpha = .20;
+      ctx.fillStyle = "#fff0a8";
+      roundRect(x, y, w, h, 14);
+      ctx.fill();
+    }
     ctx.restore();
-    drawText(label, x + w/2, y + h/2, 18, disabled ? "#aaa" : "#fff", "center", true);
+    drawText(label, x + w/2, y + h/2, hovered ? 19 : 18, disabled ? "#aaa" : (hovered ? "#fff0a8" : "#fff"), "center", true);
   }
 
   function drawInputBox(id, x, y, w, h, text, active, placeholder="") {
@@ -1040,9 +1190,25 @@
       return;
     }
     if (state === "title") {
+      if (inRect(p, titleStartRect())) { setState("select"); playSfx("select"); return; }
       const h = getTitleHotspot(p);
       if (h) { openTitleLink(h); return; }
     }
+    if (state === "select") {
+      const choice = selectChoiceRects().find(r => inRect(p, r));
+      if (choice) { selectedChar = choice.char; setState("mode"); playSfx("select"); return; }
+    }
+    if (state === "mode") {
+      const opt = modeOptionRects().find(r => inRect(p, r));
+      if (opt) {
+        if (opt.id === "single") startSingle();
+        else if (opt.id === "online") openConnectionPanel();
+        return;
+      }
+    }
+    if (state === "result" && inRect(p, resultNextRect())) { proceedResult(); return; }
+    if (state === "ending" && inRect(p, endingNextRect())) { proceedEnding(); return; }
+    if (state === "final" && inRect(p, finalNextRect())) { proceedFinal(); return; }
     if (state === "onlineLobby") {
       if (handleOnlineLobbyClick(p.x, p.y)) return;
     }
@@ -1056,11 +1222,7 @@
 
   canvas.addEventListener("mousemove", (evt) => {
     mouse = canvasPoint(evt);
-    const overTitleLink = !!getTitleHotspot(mouse);
-    const overLobbyButton = state === "onlineLobby" && onlineLobbyButtons.some(b => !b.disabled && inRect(mouse, b));
-    const mr = menuRect();
-    const overMenu = !menuOpen && mouse.x >= mr.x && mouse.x <= mr.x + mr.w && mouse.y >= mr.y && mouse.y <= mr.y + mr.h;
-    canvas.style.cursor = (overTitleLink || overLobbyButton || overMenu) ? "pointer" : "default";
+    canvas.style.cursor = hoveredInteractiveRect() ? "pointer" : "default";
   });
 
   canvas.addEventListener("mouseleave", () => {
@@ -1441,6 +1603,38 @@
     };
   }
 
+  function proceedResult() {
+    if (state !== "result" || !result) return;
+    if (result.autoReturnTitle) {
+      result = null;
+      finalStats = [];
+      stage5FailCount = 0;
+      setState("title");
+    } else if (gameMode === "single") {
+      if (result.win && stageIndex < STAGES.length - 1) startStage(stageIndex + 1);
+      else if (!result.win) startStage(stageIndex);
+      else {
+        endingTimer = 5;
+        setState("ending");
+      }
+    } else {
+      onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
+    }
+  }
+
+  function proceedEnding() {
+    if (state !== "ending") return;
+    setState("final");
+  }
+
+  function proceedFinal() {
+    if (state !== "final") return;
+    result = null;
+    finalStats = [];
+    stage5FailCount = 0;
+    setState("title");
+  }
+
   function handleKey(e) {
     if (waitingKeyAction) {
       const nk = normalizeGameKey(e);
@@ -1523,32 +1717,15 @@
       return;
     }
     if (state === "result" && e.key === "Enter") {
-      if (result && result.autoReturnTitle) {
-        result = null;
-        finalStats = [];
-        stage5FailCount = 0;
-        setState("title");
-      } else if (gameMode === "single") {
-        if (result.win && stageIndex < STAGES.length - 1) startStage(stageIndex + 1);
-        else if (!result.win) startStage(stageIndex);
-        else {
-          endingTimer = 5;
-          setState("ending");
-        }
-      } else {
-        onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
-      }
+      proceedResult();
       return;
     }
     if (state === "ending" && (e.key === "Enter" || e.key === " ")) {
-      setState("final");
+      proceedEnding();
       return;
     }
     if (state === "final" && e.key === "Enter") {
-      result = null;
-      finalStats = [];
-      stage5FailCount = 0;
-      setState("title");
+      proceedFinal();
       return;
     }
   }
@@ -1964,6 +2141,8 @@
       drawText(`${r.star} / ${r.donggop} / ${r.fever}`, cols.items, y, 22, "#fff0a8", "center", true);
       y += 42;
     }
+    const fr = finalNextRect();
+    if (inRect(mouse, fr)) drawHoverSelectBox(fr, 0.18);
     drawText("ENTER : 초기화면으로", W/2, 610, 25, "#bfe8ff");
   }
 
@@ -1974,6 +2153,10 @@
       drawText("Loading...", W/2, H/2, 42, "#fff");
     } else if (state === "title") {
       drawImageCover(assets.title || assets.bg, 0,0,W,H);
+      if (inRect(mouse, titleStartRect())) {
+        drawHoverSelectBox(titleStartRect(), 0.18);
+        drawSmallVfxAroundRect(titleStartRect(), "#fff0a8");
+      }
       drawTitleHoverVfx();
       drawParticles();
       const bob = Math.sin(nowSec()*3)*8;
@@ -1983,13 +2166,15 @@
     } else if (state === "select") {
       drawImageCover(assets.select || assets.bg, 0,0,W,H);
       drawSelectionHighlight();
+      drawSelectPopout();
       drawText("A / ← : 슈니    D / → : 다시바", W/2, 620, 34, "#fff0a8");
-      drawText(`현재 선택: ${chars[selectedChar].name}`, W/2, 670, 30, "#fff");
+      drawText(`현재 선택: ${chars[currentSelectVisualChar()].name}`, W/2, 670, 30, "#fff");
     } else if (state === "mode") {
       drawImageCover(assets.bg,0,0,W,H);
       drawPanel(220,155,840,410);
       drawText("동꼽즈 게임 모드", W/2, 220, 48, "#fff");
       drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 285, 32, "#fff0a8");
+      for (const r of modeOptionRects()) if (inRect(mouse, r)) { drawHoverSelectBox(r, 0.18); drawSmallVfxAroundRect(r, r.color); }
       drawText("ENTER / SPACE : 싱글 플레이 AI 대전", W/2, 370, 32, "#bfe8ff");
       drawText("O : ONLINE 1:1 대전", W/2, 425, 32, "#ffd6ff");
       drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 500, 21, "#fff0a8");
@@ -2045,6 +2230,8 @@
       } else if (stageIndex === 4 && !result.win) {
         drawText(`5스테이지 실패 ${result.stage5FailCount || stage5FailCount}/3`, W/2, 585, 23, "#ffb3c7");
       }
+      const rr = resultNextRect();
+      if (inRect(mouse, rr)) drawHoverSelectBox(rr, 0.18);
       drawText(`ENTER : ${next}`, W/2, 645, 27, "#fff0a8");
     } else if (state === "ending") {
       const key = chars[selectedChar].ending;
@@ -2052,6 +2239,8 @@
       ctx.fillStyle = "rgba(0,0,0,.12)"; ctx.fillRect(0,0,W,H);
       drawEndingVfx();
       drawText(`${chars[selectedChar].name} 엔딩`, W/2, 80, 48, "#fff0a8");
+      const er = endingNextRect();
+      if (inRect(mouse, er)) drawHoverSelectBox(er, 0.18);
       drawText("ENTER / SPACE : 최종 결과", W/2, 660, 28, "#fff");
     } else if (state === "final") {
       drawFinal();
