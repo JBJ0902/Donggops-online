@@ -69,6 +69,7 @@
     stage3: "assets/audio/stage3_bgm.mp3",
     stage4: "assets/audio/stage4_bgm.mp3",
     stage5: "assets/audio/stage5_bgm.mp3",
+    endingBgm: "assets/audio/ending_bgm.mp3",
     coin: "assets/audio/coin.mp3",
     item: "assets/audio/item_use.mp3",
     ready: "assets/audio/item_ready.mp3",
@@ -284,6 +285,7 @@
     else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
     else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${stageIndex + 1}`);
+    else if (state === "ending" || state === "final") playBgm("endingBgm");
     else stopBgm();
   }
 
@@ -1538,7 +1540,7 @@
       }
       return;
     }
-    if (state === "ending" && e.key === "Enter") {
+    if (state === "ending" && (e.key === "Enter" || e.key === " ")) {
       setState("final");
       return;
     }
@@ -1553,7 +1555,7 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "onlineLobby" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
+    if (state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
@@ -1589,9 +1591,9 @@
       else sendState(false);
       if (timeLeft() <= 0) finishStage();
     }
-    if (state === "ending") {
+    if (state === "ending" && endingTimer > 0) {
       endingTimer -= dt;
-      if (endingTimer <= 0) setState("final");
+      // 엔딩 BGM이 충분히 이어지도록 자동 전환하지 않고, ENTER / SPACE 입력으로 최종 결과로 이동합니다.
     }
   }
 
@@ -2050,7 +2052,7 @@
       ctx.fillStyle = "rgba(0,0,0,.12)"; ctx.fillRect(0,0,W,H);
       drawEndingVfx();
       drawText(`${chars[selectedChar].name} 엔딩`, W/2, 80, 48, "#fff0a8");
-      drawText("ENTER : 최종 결과", W/2, 660, 28, "#fff");
+      drawText("ENTER / SPACE : 최종 결과", W/2, 660, 28, "#fff");
     } else if (state === "final") {
       drawFinal();
     }
