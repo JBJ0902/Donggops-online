@@ -159,6 +159,7 @@
   let introIndex = 0;
   let introFlash = 0;
   let introVolumeDragging = false;
+  let menuVolumeDragging = null; // "bgm" | "sfx" - 설정 볼륨바 마우스 드래그
   let stageCountdownStart = 0;
   let stageCountdownEnd = 0;
 
@@ -571,13 +572,13 @@
     drawText(`BGM 볼륨 ${bgmMuted ? "음소거" : (bgmVolume*100).toFixed(0) + "%"}`, W/2, 245, 28, "#fff");
     menuButton("bgmDown", 360, 278, 120, 46, "BGM -");
     menuButton("bgmUp", 800, 278, 120, 46, "BGM +");
-    drawVolumeBar(525, 290, 230, 22, bgmMuted ? 0 : bgmVolume, "#8bdfff");
+    drawVolumeBar(525, 290, 230, 22, bgmMuted ? 0 : bgmVolume, "#8bdfff", "bgm");
     menuButton("bgmMute", 540, 328, 200, 44, bgmMuted ? "BGM 음소거 해제" : "BGM 음소거");
 
     drawText(`효과음 볼륨 ${(sfxVolume*100).toFixed(0)}%`, W/2, 408, 28, "#fff");
     menuButton("sfxDown", 360, 441, 120, 46, "효과음 -");
     menuButton("sfxUp", 800, 441, 120, 46, "효과음 +");
-    drawVolumeBar(525, 453, 230, 22, sfxVolume, "#ff8ee4");
+    drawVolumeBar(525, 453, 230, 22, sfxVolume, "#ff8ee4", "sfx");
 
     menuButton("keySettings", 175, 560, 155, 50, "키 설정");
     menuButton("help", 365, 560, 150, 50, "게임 설명");
@@ -586,25 +587,87 @@
     menuButton("title", 950, 560, 155, 50, (gameMode === "online" && connected) ? "온라인 로비" : "초기화면");
   }
 
-  function drawVolumeBar(x, y, w, h, ratio, color) {
+  function menuVolumeSliderRect(kind) {
+    if (kind === "bgm") return { id: "bgmSlider", kind: "bgm", x: 525, y: 290, w: 230, h: 22, color: "#8bdfff", label: "BGM 볼륨" };
+    return { id: "sfxSlider", kind: "sfx", x: 525, y: 453, w: 230, h: 22, color: "#ff8ee4", label: "효과음 볼륨" };
+  }
+
+  function menuVolumeHitRect(kind) {
+    const r = menuVolumeSliderRect(kind);
+    return { ...r, x: r.x - 18, y: r.y - 16, w: r.w + 36, h: r.h + 32 };
+  }
+
+  function hoveredMenuVolumeSlider(p=mouse) {
+    if (!menuOpen || menuTab !== "settings") return null;
+    if (inRect(p, menuVolumeHitRect("bgm"))) return "bgm";
+    if (inRect(p, menuVolumeHitRect("sfx"))) return "sfx";
+    return null;
+  }
+
+  function setMenuVolumeFromX(kind, x) {
+    const r = menuVolumeSliderRect(kind);
+    const value = Math.max(0, Math.min(1, (x - r.x) / r.w));
+    if (kind === "bgm") {
+      bgmVolume = value;
+      bgmMuted = false;
+    } else {
+      sfxVolume = value;
+    }
+    applyVolumes();
+    saveSettings();
+  }
+
+  function drawVolumeBar(x, y, w, h, ratio, color, kind=null) {
     const v = Math.max(0, Math.min(1, Number(ratio) || 0));
     const fillW = w * v;
+    const hovered = kind && (menuVolumeDragging === kind || hoveredMenuVolumeSlider() === kind);
+    const hot = kind ? menuVolumeHitRect(kind) : { x, y, w, h };
     ctx.save();
+
+    if (hovered) {
+      ctx.fillStyle = "rgba(255,255,255,.10)";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 16;
+      roundRect(hot.x, hot.y, hot.w, hot.h, 16);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    ctx.shadowBlur = 0;
     ctx.fillStyle = "rgba(255,255,255,.15)";
     roundRect(x, y, w, h, 10);
     ctx.fill();
 
     // 0%일 때는 컬러 게이지를 아예 그리지 않아 왼쪽에서 뒤로 꺾여 보이는 잔상 버그를 방지합니다.
     if (fillW > 1) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = hovered ? 14 : 0;
       ctx.fillStyle = color;
       roundRect(x, y, fillW, h, Math.min(10, fillW / 2, h / 2));
       ctx.fill();
     }
 
-    ctx.strokeStyle = "rgba(255,255,255,.65)";
-    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = hovered ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.65)";
+    ctx.lineWidth = hovered ? 2.6 : 2;
     roundRect(x, y, w, h, 10);
     ctx.stroke();
+
+    if (hovered) {
+      const knobX = x + w * v;
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(knobX, y + h / 2, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      drawText("DRAG", x + w + 48, y + h / 2, 13, color, "center", true);
+    }
     ctx.restore();
   }
 
@@ -899,7 +962,13 @@
     const mr = menuRect();
     if (menuOpen) {
       const b = menuButtons.find(v => inRect(mouse, v));
-      return b ? { ...b, color: "#fff0a8" } : null;
+      if (b) return { ...b, color: "#fff0a8" };
+      const sliderKind = hoveredMenuVolumeSlider();
+      if (sliderKind) {
+        const r = menuVolumeHitRect(sliderKind);
+        return { ...r, color: r.color, label: sliderKind === "bgm" ? "BGM 볼륨 조절" : "효과음 볼륨 조절" };
+      }
+      return null;
     }
     if (state === "intro") {
       if (inRect(mouse, introSkipRect())) return introSkipRect();
@@ -1404,6 +1473,12 @@
     unlockAudio();
     const p = canvasPoint(evt);
     if (menuOpen) {
+      const sliderKind = hoveredMenuVolumeSlider(p);
+      if (sliderKind) {
+        setMenuVolumeFromX(sliderKind, p.x);
+        if (sliderKind === "sfx") playSfx("coin", .45);
+        return;
+      }
       handleMenuClick(p.x, p.y);
       return;
     }
@@ -1446,6 +1521,16 @@
 
   canvas.addEventListener("pointerdown", (evt) => {
     const p = canvasPoint(evt);
+    if (menuOpen) {
+      const sliderKind = hoveredMenuVolumeSlider(p);
+      if (sliderKind) {
+        unlockAudio();
+        menuVolumeDragging = sliderKind;
+        setMenuVolumeFromX(sliderKind, p.x);
+        evt.preventDefault();
+        return;
+      }
+    }
     if (state === "intro" && introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) {
       unlockAudio();
       introVolumeDragging = true;
@@ -1455,12 +1540,22 @@
   });
 
   canvas.addEventListener("pointermove", (evt) => {
-    if (!introVolumeDragging) return;
     const p = canvasPoint(evt);
+    mouse = p;
+    if (menuVolumeDragging) {
+      setMenuVolumeFromX(menuVolumeDragging, p.x);
+      evt.preventDefault();
+      return;
+    }
+    if (!introVolumeDragging) return;
     setIntroVolumeFromX(p.x);
   });
 
-  window.addEventListener("pointerup", () => { introVolumeDragging = false; });
+  window.addEventListener("pointerup", () => {
+    if (menuVolumeDragging === "sfx") playSfx("coin", .45);
+    introVolumeDragging = false;
+    menuVolumeDragging = null;
+  });
 
   canvas.addEventListener("mousemove", (evt) => {
     mouse = canvasPoint(evt);
@@ -1469,6 +1564,8 @@
 
   canvas.addEventListener("mouseleave", () => {
     mouse = { x: -999, y: -999 };
+    introVolumeDragging = false;
+    menuVolumeDragging = null;
     canvas.style.cursor = "default";
   });
 
