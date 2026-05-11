@@ -671,13 +671,30 @@
     const key = idx === 0 ? "shuniSelect" : "dashibaSelect";
     const img = assets[key];
     if (!r) return;
+
+    const popX = r.x - 10;
+    const popY = r.y - 12;
+    const popW = r.w + 20;
+    const popH = r.h + 20;
+    const popRadius = 30;
+
     ctx.save();
     ctx.shadowColor = r.color;
     ctx.shadowBlur = 24;
     ctx.globalAlpha = 0.90;
     // 선택 캐릭터만 카드 위치에서 살짝 확대되어 튀어나오는 느낌.
-    drawImageCover(img, r.x - 10, r.y - 12, r.w + 20, r.h + 20);
+    drawImageCoverRounded(img, popX, popY, popW, popH, popRadius);
     ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.72)";
+    ctx.lineWidth = 2;
+    ctx.shadowColor = r.color;
+    ctx.shadowBlur = 18;
+    roundRect(popX, popY, popW, popH, popRadius);
+    ctx.stroke();
+    ctx.restore();
+
     drawHoverSelectBox(r, 0.16);
     drawSmallVfxAroundRect(r, r.color);
     drawText(idx === 0 ? "슈니 선택" : "다시바 선택", r.x + r.w/2, r.y + 28, 20, r.color, "center", true);
@@ -1789,6 +1806,14 @@
     const dx = x + (w - dw) / 2;
     const dy = y + (h - dh) / 2;
     ctx.drawImage(img, dx, dy, dw, dh);
+  }
+
+  function drawImageCoverRounded(img, x, y, w, h, radius=24) {
+    ctx.save();
+    roundRect(x, y, w, h, radius);
+    ctx.clip();
+    drawImageCover(img, x, y, w, h);
+    ctx.restore();
   }
 
   function drawText(text, x, y, size=32, color="#fff", align="center", stroke=true) {
