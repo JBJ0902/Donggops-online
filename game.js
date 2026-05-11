@@ -31,6 +31,13 @@
   const assets = {};
   const assetList = {
     title: "assets/images/title_screen.webp",
+    intro1: "assets/images/dongggop_intro_1.webp",
+    intro2: "assets/images/dongggop_intro_2.webp",
+    intro3: "assets/images/dongggop_intro_3.webp",
+    intro4: "assets/images/dongggop_intro_4.webp",
+    intro5: "assets/images/dongggop_intro_5.webp",
+    intro6: "assets/images/dongggop_intro_6.webp",
+    volumeIcon: "assets/images/volume_icon.png",
     select: "assets/images/character_select_screen.webp",
     bg: "assets/images/bg.webp",
     coin: "assets/images/coin.webp",
@@ -64,6 +71,7 @@
 
   const audio = {};
   const audioFiles = {
+    introBgm: "assets/audio/donggopp_killkill_1.mp3",
     titleBgm: "assets/audio/bgm.mp3",
     selectBgm: "assets/audio/select_bgm.mp3",
     stage1: "assets/audio/stage1_bgm.mp3",
@@ -148,6 +156,9 @@
   let titleClickFlashColor = "#ffffff";
   let titleClickFlashX = W/2;
   let titleClickFlashY = H/2;
+  let introIndex = 0;
+  let introFlash = 0;
+  let introVolumeDragging = false;
 
   const ONLINE_DURATIONS = [120, 180, 240, 300];
   const ONLINE_BGM_OPTIONS = [
@@ -227,7 +238,7 @@
 
   function tryTitleAutoplay() {
     if (audioUnlocked) return;
-    const a = audio.titleBgm;
+    const a = state === "intro" ? audio.introBgm : audio.titleBgm;
     if (!a) return;
     try {
       a.volume = bgmEffectiveVolume();
@@ -283,7 +294,8 @@
 
   function switchBgmForState() {
     if (!audioUnlocked) return;
-    if (state === "title") playBgm("titleBgm");
+    if (state === "intro") playBgm("introBgm");
+    else if (state === "title") playBgm("titleBgm");
     else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
     else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${stageIndex + 1}`);
@@ -477,7 +489,7 @@
   }
 
   function drawMenuIcon() {
-    if (state === "loading") return;
+    if (state === "loading" || state === "intro") return;
     const { x, y, w, h } = menuRect();
     const onlineActive = (gameMode === "online" || role === "host" || role === "guest") && (state === "playing" || state === "onlineCountdown");
     const label = onlineActive ? "LOBBY" : "MENU";
@@ -628,6 +640,134 @@
     return { id: "finalNext", x: 420, y: 580, w: 440, h: 58, color: "#bfe8ff", label: "초기화면" };
   }
 
+  function introSkipRect() {
+    return { id: "introSkip", x: 1136, y: 646, w: 112, h: 48, color: "#fff0a8", label: "SKIP" };
+  }
+
+  function introVolumeRect() {
+    return { id: "introVolume", x: 1012, y: 584, w: 230, h: 52, color: "#bfe8ff", label: "볼륨" };
+  }
+
+  function introVolumeSliderRect() {
+    return { id: "introVolumeSlider", x: 1088, y: 603, w: 130, h: 14, color: "#9cffb0", label: "볼륨" };
+  }
+
+  function setIntroVolumeFromX(x) {
+    const r = introVolumeSliderRect();
+    bgmVolume = Math.max(0, Math.min(1, (x - r.x) / r.w));
+    bgmMuted = false;
+    applyVolumes();
+    saveSettings();
+  }
+
+  function goTitleFromIntro() {
+    introVolumeDragging = false;
+    introFlash = 0;
+    setState("title");
+  }
+
+  function nextIntroScene() {
+    playSfx("select", .8);
+    if (introIndex < 5) {
+      introIndex++;
+      introFlash = 0.58;
+    } else {
+      goTitleFromIntro();
+    }
+  }
+
+  function drawIntroVfx() {
+    const t = nowSec();
+    ctx.save();
+    for (let i = 0; i < 18; i++) {
+      const x = 45 + ((i * 83 + t * 24) % 1190);
+      const y = 45 + ((i * 47 + t * 18) % 620);
+      ctx.globalAlpha = 0.18 + 0.18 * Math.sin(t * 2.2 + i);
+      ctx.fillStyle = ["#fff0a8", "#8bdfff", "#ff8ee4", "#ffffff"][i % 4];
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 12;
+      drawStar(x, y, 4 + (i % 4) * 1.4, t * 35 + i * 22);
+    }
+    for (let i = 0; i < 8; i++) {
+      const x = 80 + i * 150 + Math.sin(t * .9 + i) * 18;
+      const y = 110 + ((t * 35 + i * 67) % 500);
+      ctx.globalAlpha = 0.12 + 0.08 * Math.sin(t * 1.8 + i);
+      ctx.strokeStyle = i % 2 ? "#ff8ee4" : "#8bdfff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 10 + (i % 3) * 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawIntroControls() {
+    const skip = introSkipRect();
+    const vol = introVolumeRect();
+    const slider = introVolumeSliderRect();
+    if (inRect(mouse, skip)) drawHoverSelectBox(skip, 0.18);
+    if (inRect(mouse, vol)) {
+      ctx.save();
+      ctx.globalAlpha = .16;
+      ctx.fillStyle = "#bfe8ff";
+      roundRect(vol.x, vol.y, vol.w, vol.h, 18);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.46)";
+    ctx.strokeStyle = inRect(mouse, vol) ? "rgba(190,232,255,.95)" : "rgba(255,255,255,.55)";
+    ctx.lineWidth = inRect(mouse, vol) ? 2.5 : 1.5;
+    roundRect(vol.x, vol.y, vol.w, vol.h, 18);
+    ctx.fill();
+    ctx.stroke();
+    if (assets.volumeIcon) ctx.drawImage(assets.volumeIcon, vol.x + 11, vol.y + 6, 40, 40);
+    else drawText("🔊", vol.x + 32, vol.y + 26, 25, "#fff", "center", false);
+
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    roundRect(slider.x, slider.y, slider.w, slider.h, 7);
+    ctx.fill();
+    const vw = slider.w * bgmEffectiveVolume();
+    if (vw > 1) {
+      ctx.shadowColor = "#9cffb0";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#9cffb0";
+      roundRect(slider.x, slider.y, Math.max(slider.h, vw), slider.h, 7);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.70)";
+    ctx.lineWidth = 2;
+    roundRect(slider.x, slider.y, slider.w, slider.h, 7);
+    ctx.stroke();
+    const knobX = slider.x + slider.w * bgmEffectiveVolume();
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = "#ffffff";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(knobX, slider.y + slider.h / 2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    drawText("SKIP", skip.x + skip.w/2, skip.y + skip.h/2, 21, inRect(mouse, skip) ? "#fff0a8" : "#fff", "center", true);
+    drawText("ENTER / SPACE / CLICK : 다음", W/2, 686, 23, "#fff0a8", "center", true);
+    drawText(`${introIndex + 1} / 6`, 62, 682, 20, "#bfe8ff", "left", true);
+  }
+
+  function drawIntroScreen() {
+    drawImageCover(assets[`intro${introIndex + 1}`] || assets.bg, 0, 0, W, H);
+    drawIntroVfx();
+    drawIntroControls();
+    if (introFlash > 0) {
+      const a = Math.min(.92, introFlash / .58);
+      ctx.save();
+      ctx.globalAlpha = a * .86;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  }
+
   function drawHoverSelectBox(r, alpha=0.22) {
     const t = nowSec();
     const pulse = alpha + 0.06 * Math.sin(t * 6);
@@ -712,6 +852,11 @@
     if (menuOpen) {
       const b = menuButtons.find(v => inRect(mouse, v));
       return b ? { ...b, color: "#fff0a8" } : null;
+    }
+    if (state === "intro") {
+      if (inRect(mouse, introSkipRect())) return introSkipRect();
+      if (inRect(mouse, introVolumeRect())) return introVolumeRect();
+      return { id: "introNext", x: 0, y: 0, w: W, h: H, color: "#fff0a8", label: "다음" };
     }
     if (state === "title") {
       const sr = titleStartRect();
@@ -1213,6 +1358,12 @@
       handleMenuClick(p.x, p.y);
       return;
     }
+    if (state === "intro") {
+      if (inRect(p, introSkipRect())) { goTitleFromIntro(); return; }
+      if (inRect(p, introVolumeRect())) { setIntroVolumeFromX(p.x); return; }
+      nextIntroScene();
+      return;
+    }
     if (state === "title") {
       if (inRect(p, titleStartRect())) { setState("select"); playSfx("select"); return; }
       const h = getTitleHotspot(p);
@@ -1244,6 +1395,24 @@
     }
   });
 
+  canvas.addEventListener("pointerdown", (evt) => {
+    const p = canvasPoint(evt);
+    if (state === "intro" && inRect(p, introVolumeRect())) {
+      unlockAudio();
+      introVolumeDragging = true;
+      setIntroVolumeFromX(p.x);
+      evt.preventDefault();
+    }
+  });
+
+  canvas.addEventListener("pointermove", (evt) => {
+    if (!introVolumeDragging) return;
+    const p = canvasPoint(evt);
+    setIntroVolumeFromX(p.x);
+  });
+
+  window.addEventListener("pointerup", () => { introVolumeDragging = false; });
+
   canvas.addEventListener("mousemove", (evt) => {
     mouse = canvasPoint(evt);
     canvas.style.cursor = hoveredInteractiveRect() ? "pointer" : "default";
@@ -1256,7 +1425,7 @@
 
 
   window.addEventListener("pointerdown", () => {
-    if (state === "title") unlockAudio();
+    if (state === "intro" || state === "title") unlockAudio();
   }, { once: true });
 
   function startSingle() {
@@ -1708,6 +1877,11 @@
       return;
     }
     if (state === "onlineCountdown") return;
+    if (state === "intro" && (e.key === "Enter" || e.key === " ")) {
+      nextIntroScene();
+      return;
+    }
+    if (state === "intro") return;
     if (state === "title" && (e.key === "Enter" || e.key === " ")) {
       setState("select"); playSfx("select"); return;
     }
@@ -1756,11 +1930,12 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
+    if (state === "intro" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
   function update(dt) {
+    if (introFlash > 0) introFlash = Math.max(0, introFlash - dt * 1.9);
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
     if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
       startOnlineMatch();
@@ -2183,6 +2358,8 @@
     if (state === "loading") {
       ctx.fillStyle = "#050512"; ctx.fillRect(0,0,W,H);
       drawText("Loading...", W/2, H/2, 42, "#fff");
+    } else if (state === "intro") {
+      drawIntroScreen();
     } else if (state === "title") {
       drawImageCover(assets.title || assets.bg, 0,0,W,H);
       if (inRect(mouse, titleStartRect())) {
@@ -2293,7 +2470,7 @@
   applyVolumes();
 
   Promise.all(Object.entries(assetList).map(([k,v]) => loadImage(k,v))).then(() => {
-    setState("title");
+    setState("intro");
     tryTitleAutoplay();
     requestAnimationFrame(loop);
   });
