@@ -235,6 +235,9 @@
   let floatingBgmDragging = false; // 타이틀/게임 화면 우측 음악 볼륨 드래그
   let stageCountdownStart = 0;
   let stageCountdownEnd = 0;
+  let adminTestMode = false;
+  let adminStageNotice = "";
+  let adminStageNoticeTimer = 0;
 
   const ONLINE_DURATIONS = [120, 180, 240, 300];
   const ONLINE_BGM_OPTIONS = [
@@ -418,6 +421,35 @@
     if (!currentAccount()) return "로그인 후 기록 저장";
     if (remoteApiEnabled() && currentGoogleIdToken) return "외부 경쟁전 랭킹 연동";
     return "이 기기 로컬 기록";
+  }
+
+  function isAdminAccount() {
+    const acc = currentAccount();
+    if (!acc) return false;
+    const nickname = sanitizePlayerName(acc.nickname || "").toUpperCase();
+    // GitHub Pages 정적 배포 환경이라 서버 차원의 완전한 권한 보안은 아니지만,
+    // 일반 유저 화면에는 노출하지 않는 관리자용 밸런스 테스트 게이트입니다.
+    return ["GM", "ADMIN", "JBJ", "관리자"].includes(nickname);
+  }
+
+  function setAdminStageNotice(msg) {
+    adminStageNotice = msg || "";
+    adminStageNoticeTimer = adminStageNotice ? 2.8 : 0;
+  }
+
+  function openAdminStageSelect() {
+    if (!isAdminAccount()) {
+      setLoginNotice("관리자 계정만 접근 가능");
+      playSfx("coin", .55);
+      return;
+    }
+    adminTestMode = true;
+    result = null;
+    finalStats = [];
+    leaderboardScroll = 0;
+    closePeer();
+    setAdminStageNotice("관리자 밸런스 테스트 모드");
+    setState("adminStageSelect");
   }
 
   function accountUsefulLabel(acc=currentAccount()) {
@@ -1045,7 +1077,7 @@
     if (!audioUnlocked) return;
     if (state === "intro") ensureIntroBgmPlaying(false);
     else if (state === "title") playBgm("titleBgm");
-    else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
+    else if (state === "select" || state === "mode" || state === "adminStageSelect" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
     else if (state === "stageCountdown") playBgm(`stage${Math.min(stageIndex + 1, 5)}`);
     else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${Math.min(stageIndex + 1, 5)}`);
@@ -1559,6 +1591,25 @@
     ];
   }
 
+  function adminStageRects() {
+    const rects = [];
+    const startX = 170, startY = 188, gapX = 28, gapY = 28, w = 170, h = 116;
+    for (let i = 0; i < 10; i++) {
+      const col = i % 5;
+      const row = Math.floor(i / 5);
+      rects.push({
+        id: `adminStage${i + 1}`, stage: i + 1,
+        x: startX + col * (w + gapX), y: startY + row * (h + gapY), w, h,
+        color: i < 5 ? "#65b5ff" : "#fff0a8", label: `${i + 1}스테이지`
+      });
+    }
+    return rects;
+  }
+
+  function adminStageBackRect() {
+    return { id: "adminStageBack", x: 430, y: 595, w: 420, h: 54, color: "#bfe8ff", label: "모드 선택으로" };
+  }
+
   function selectChoiceRects() {
     return [
       { id: "shuniChoice", char: 0, x: 342, y: 86, w: 314, h: 548, color: "#65b5ff", label: "슈니 선택" },
@@ -2039,6 +2090,63 @@
     if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 678, 16, "#ffb0b0");
   }
 
+  function drawAdminStageSelect() {
+    drawImageCover(assets.bg, 0, 0, W, H);
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.54)";
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    drawPanel(70, 58, 1140, 604);
+    drawText("관리자 밸런스 테스트", W/2, 105, 42, "#fff0a8");
+    drawText("1~10스테이지를 바로 시작합니다 · 기록/랭킹 저장 없음", W/2, 145, 21, "#bfe8ff");
+    drawText(`테스트 캐릭터: ${chars[selectedChar].name} / AI: ${chars[1-selectedChar].name}`, W/2, 171, 18, "#ffffff");
+
+    for (const r of adminStageRects()) {
+      const st = STAGES[r.stage - 1];
+      const hovered = inRect(mouse, r);
+      const pulse = hovered ? 1.02 + Math.sin(nowSec()*8)*0.006 : 1;
+      const cx = r.x + r.w/2, cy = r.y + r.h/2;
+      const x = cx - r.w*pulse/2, y = cy - r.h*pulse/2, w = r.w*pulse, h = r.h*pulse;
+      ctx.save();
+      ctx.shadowColor = r.color;
+      ctx.shadowBlur = hovered ? 26 : 10;
+      ctx.fillStyle = hovered ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.58)";
+      ctx.strokeStyle = hovered ? r.color : "rgba(255,255,255,.60)";
+      ctx.lineWidth = hovered ? 3 : 1.8;
+      roundRect(x, y, w, h, 22);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      if (hovered) {
+        drawHoverSelectBox({ x, y, w, h, color: r.color }, 0.12);
+        drawSmallVfxAroundRect({ x, y, w, h }, r.color);
+      }
+      drawText(`${st.no} STAGE`, cx, y + 28, 22, r.color, "center", true);
+      drawText(st.rank, cx, y + 60, 18, "#ffffff", "center", true);
+      drawText(`AI ${st.ai} CPM`, cx, y + 88, 16, "#fff0a8", "center", true);
+    }
+
+    const br = adminStageBackRect();
+    const backHover = inRect(mouse, br);
+    if (backHover) {
+      drawHoverSelectBox(br, 0.16);
+      drawSmallVfxAroundRect(br, br.color);
+    }
+    ctx.save();
+    ctx.fillStyle = backHover ? "rgba(255,255,255,.18)" : "rgba(0,0,0,.55)";
+    ctx.strokeStyle = backHover ? br.color : "rgba(255,255,255,.65)";
+    ctx.lineWidth = 2;
+    roundRect(br.x, br.y, br.w, br.h, 18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText("ESC / CLICK : 모드 선택으로", br.x + br.w/2, br.y + br.h/2, 22, "#bfe8ff", "center", true);
+
+    drawText("키보드: 1~9, 0=10스테이지 바로 시작", W/2, 570, 18, "#ffffff", "center", true);
+    if (adminStageNoticeTimer > 0 && adminStageNotice) drawText(adminStageNotice, W/2, 680, 18, "#fff0a8", "center", true);
+  }
+
   function drawIntroScreen() {
     drawImageCover(assets[`intro${introIndex + 1}`] || assets.bg, 0, 0, W, H);
     drawIntroVfx();
@@ -2160,6 +2268,7 @@
     }
     if (state === "select") return selectChoiceRects().find(r => inRect(mouse, r)) || null;
     if (state === "mode") return modeOptionRects().find(r => inRect(mouse, r)) || null;
+    if (state === "adminStageSelect") return adminStageRects().find(r => inRect(mouse, r)) || (inRect(mouse, adminStageBackRect()) ? adminStageBackRect() : null);
     if (state === "result") return inRect(mouse, resultNextRect()) ? resultNextRect() : null;
     if (state === "ending") return inRect(mouse, endingNextRect()) ? endingNextRect() : null;
     if (state === "final") {
@@ -2374,6 +2483,7 @@
 
   function startOnlineCountdown(broadcast=true) {
     ensureOnlinePlayers();
+    adminTestMode = false;
     gameMode = "online";
     menuOpen = false;
     particles = [];
@@ -2386,6 +2496,7 @@
   }
 
   function startOnlineMatch() {
+    adminTestMode = false;
     gameMode = "online";
     ensureOnlinePlayers();
     const remoteChar = remote ? remote.char : (1 - selectedChar);
@@ -2695,6 +2806,11 @@
         return;
       }
     }
+    if (state === "adminStageSelect") {
+      const stageBtn = adminStageRects().find(r => inRect(p, r));
+      if (stageBtn) { startAdminStage(stageBtn.stage); return; }
+      if (inRect(p, adminStageBackRect())) { adminTestMode = false; setState("mode"); return; }
+    }
     if (state === "result" && inRect(p, resultNextRect())) { proceedResult(); return; }
     if (state === "ending" && inRect(p, endingNextRect())) { proceedEnding(); return; }
     if (state === "final" && gameMode === "competition" && inRect(p, competitionRefreshRect())) { refreshCompetitionRankNow(); return; }
@@ -2787,6 +2903,7 @@
   });
 
   function startSingle() {
+    adminTestMode = false;
     gameMode = "single";
     stage5FailCount = 0;
     competitionSaved = false;
@@ -2798,6 +2915,7 @@
   }
 
   function startCompetition() {
+    adminTestMode = false;
     if (!currentUserId) {
       setLoginNotice("사용자 경쟁전은 로그인 후 이용 가능");
       return;
@@ -2811,6 +2929,25 @@
     remote = defaultPlayer(1 - selectedChar, "right", "AI " + chars[1 - selectedChar].name);
     finalStats = [];
     startStage(0);
+  }
+
+  function startAdminStage(stageNo) {
+    if (!isAdminAccount()) {
+      setAdminStageNotice("관리자 계정만 접근 가능");
+      return;
+    }
+    const idx = Math.max(0, Math.min(9, Number(stageNo || 1) - 1));
+    adminTestMode = true;
+    gameMode = "competition";
+    closePeer();
+    local = defaultPlayer(selectedChar, "left", currentNickname() || "관리자");
+    remote = defaultPlayer(1 - selectedChar, "right", "AI " + chars[1 - selectedChar].name);
+    finalStats = [];
+    result = null;
+    competitionSaved = true; // 테스트 결과가 기록/랭킹에 저장되지 않도록 차단
+    leaderboardScroll = 0;
+    playSfx("select", 1.05);
+    startStage(idx);
   }
 
   function startOnlineAsReady() {
@@ -2867,7 +3004,7 @@
       reason,
     };
     if (gameMode !== "online") finalStats.push(result);
-    if (gameMode === "single" || gameMode === "competition") saveUserStageRecord(result, gameMode === "competition" ? "competition_stage" : "single_stage");
+    if (!adminTestMode && (gameMode === "single" || gameMode === "competition")) saveUserStageRecord(result, gameMode === "competition" ? "competition_stage" : "single_stage");
     playSfx(result.win ? "resultWin" : "resultLose", 1.0);
     setState("result");
   }
@@ -3122,6 +3259,7 @@
     dc = channel;
     dc.onopen = () => {
       connected = true;
+      adminTestMode = false;
       gameMode = "online";
       signalPanel.classList.add("hidden");
       localPlayerName = getLocalName();
@@ -3204,6 +3342,13 @@
 
   function proceedResult() {
     if (state !== "result" || !result) return;
+    if (adminTestMode) {
+      result = null;
+      finalStats = [];
+      setAdminStageNotice("다른 스테이지를 바로 선택하세요");
+      setState("adminStageSelect");
+      return;
+    }
     if (result.autoReturnTitle) {
       result = null;
       finalStats = [];
@@ -3268,7 +3413,8 @@
     unlockAudio();
     const k = e.key.toLowerCase();
     if (e.key === "Escape") {
-      if (state === "playing" && gameMode === "online" && !menuOpen) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
+      if (state === "adminStageSelect") { adminTestMode = false; setState("mode"); }
+      else if (state === "playing" && gameMode === "online" && !menuOpen) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
       else if (menuOpen) closeMenu();
       else openMenu();
       return;
@@ -3314,10 +3460,17 @@
       return;
     }
     if (state === "mode") {
+      if (e.ctrlKey && e.shiftKey && k === "t") { openAdminStageSelect(); return; }
       if (e.key === "Enter" || e.key === " ") { playSfx("select", 1.05); startSingle(); }
       if (k === "o") { playSfx("select", 1.05); openConnectionPanel(); }
       if (k === "c") { playSfx("select", 1.05); startCompetition(); }
       if (k === "r") { playSfx("select", 1.05); openCompetitionRankPage(); }
+      return;
+    }
+    if (state === "adminStageSelect") {
+      if (e.key === "Escape") { adminTestMode = false; setState("mode"); return; }
+      if (/^[1-9]$/.test(e.key)) { startAdminStage(Number(e.key)); return; }
+      if (e.key === "0") { startAdminStage(10); return; }
       return;
     }
     if (state === "playing") {
@@ -3394,7 +3547,7 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "intro" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).map(v => normalizeKeyConfigValue(v, "")).includes(nk)) e.preventDefault();
+    if (state === "intro" || state === "adminStageSelect" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).map(v => normalizeKeyConfigValue(v, "")).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
@@ -3410,6 +3563,7 @@
     if (introFlash > 0) introFlash = Math.max(0, introFlash - dt * 1.9);
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
     if (loginNoticeTimer > 0) loginNoticeTimer = Math.max(0, loginNoticeTimer - dt);
+    if (adminStageNoticeTimer > 0) adminStageNoticeTimer = Math.max(0, adminStageNoticeTimer - dt);
     if (leaderboardNoticeTimer > 0) leaderboardNoticeTimer = Math.max(0, leaderboardNoticeTimer - dt);
     if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
       startOnlineMatch();
@@ -3650,7 +3804,7 @@
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(W/2,190); ctx.lineTo(W/2,520); ctx.stroke();
     }
-    drawText(`${STAGES[stageIndex].name} / ${gameMode === "competition" ? "사용자 경쟁전" : "AI 대전"}`, W/2, 42, 34, "#fff");
+    drawText(`${STAGES[stageIndex].name} / ${adminTestMode ? "관리자 테스트" : (gameMode === "competition" ? "사용자 경쟁전" : "AI 대전")}`, W/2, 42, 34, "#fff");
     drawText(`난이도 ${STAGES[stageIndex].rank}`, W/2, 88, 24, "#fff0a8");
 
     const elapsed = Math.max(0, nowSec() - stageCountdownStart);
@@ -3712,7 +3866,7 @@
     const left = timeLeft();
     const mm = Math.floor(left/60).toString().padStart(2,"0");
     const ss = Math.floor(left%60).toString().padStart(2,"0");
-    drawText(gameMode === "online" ? "ONLINE 1:1 대전" : `${STAGES[stageIndex].name} / ${gameMode === "competition" ? "사용자 경쟁전" : "AI 대전"}`, W/2, 28, 28, "#fff");
+    drawText(gameMode === "online" ? "ONLINE 1:1 대전" : `${STAGES[stageIndex].name} / ${adminTestMode ? "관리자 테스트" : (gameMode === "competition" ? "사용자 경쟁전" : "AI 대전")}`, W/2, 28, 28, "#fff");
     drawText(`${mm}:${ss}`, W/2, 76, 42, "#fff0a8");
     drawText(gameMode === "online" ? `${getLocalName()} vs ${remote ? remote.name : "상대"}` : `난이도 ${STAGES[stageIndex].rank}`, W/2, 114, 22, "#fff");
 
@@ -4097,6 +4251,7 @@
   }
 
   function openCompetitionRankPage() {
+    adminTestMode = false;
     gameMode = "competition";
     result = null;
     finalStats = [];
@@ -4254,6 +4409,8 @@
       drawText(`현재 선택: ${chars[currentSelectVisualChar()].name}`, W/2, 670, 30, "#fff");
     } else if (state === "mode") {
       drawModeMenuUI();
+    } else if (state === "adminStageSelect") {
+      drawAdminStageSelect();
     } else if (state === "connected") {
       drawImageCover(assets.bg,0,0,W,H);
       drawPanel(270,220,740,260);
@@ -4305,9 +4462,11 @@
       drawText(`별풍선 ${result.star}회 / 동꼽 ${result.donggop}개 / 피버 ${result.fever}회`, W/2, 467, 25);
       drawText(`최대 콤보 ${result.combo}`, W/2, 517, 25);
 
-      let next = gameMode === "competition"
-        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "사용자 경쟁전 순위 보기")
-        : (gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비");
+      let next = adminTestMode
+        ? "관리자 스테이지 선택"
+        : (gameMode === "competition"
+          ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "사용자 경쟁전 순위 보기")
+          : (gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비"));
       if (result.autoReturnTitle) {
         drawText(`5스테이지 3회 실패 - ${Math.ceil(result.returnTimer || 3)}초 후 초기화면`, W/2, 585, 23, "#ffb3c7");
         next = "초기화면";
