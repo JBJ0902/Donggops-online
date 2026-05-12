@@ -38,7 +38,6 @@
     intro5: "assets/images/dongggop_intro_5.webp",
     intro6: "assets/images/dongggop_intro_6.webp",
     volumeIcon: "assets/images/volume_icon.png",
-    fullscreenIcon: "assets/images/fullscreen_icon.png",
     select: "assets/images/character_select_screen.webp",
     bg: "assets/images/bg.webp",
     coin: "assets/images/coin.webp",
@@ -234,32 +233,67 @@
 
   function nowSec() { return performance.now() / 1000; }
 
+  function isBgmKey(key) {
+    return key && (key.includes("Bgm") || key.startsWith("stage"));
+  }
+
+  function playIntroBgmDirect() {
+    const a = audio.introBgm;
+    if (!a || state !== "intro") return;
+    try {
+      if (currentBgm && currentBgm !== a) currentBgm.pause();
+      currentBgm = a;
+      a.loop = true;
+      a.muted = false;
+      a.volume = bgmEffectiveVolume();
+      const p = a.play();
+      if (p && p.then) {
+        p.then(() => { audioUnlocked = true; }).catch(() => {
+          if (currentBgm === a && a.paused) currentBgm = null;
+        });
+      } else {
+        audioUnlocked = true;
+      }
+    } catch {
+      if (currentBgm === a && a.paused) currentBgm = null;
+    }
+  }
+
   function unlockAudio() {
-    if (audioUnlocked) return;
     audioUnlocked = true;
     applyVolumes();
-    switchBgmForState();
+    if (state === "intro") playIntroBgmDirect();
+    else switchBgmForState();
   }
 
   function tryTitleAutoplay() {
-    if (audioUnlocked) return;
     const a = state === "intro" ? audio.introBgm : audio.titleBgm;
     if (!a) return;
     try {
+      if (state === "intro") {
+        currentBgm = a;
+        a.loop = true;
+      }
+      a.muted = false;
       a.volume = bgmEffectiveVolume();
       const p = a.play();
       if (p) {
         p.then(() => {
           audioUnlocked = true;
           currentBgm = a;
-        }).catch(() => {});
+        }).catch(() => {
+          // PC/모바일 브라우저가 자동재생을 막으면 첫 터치/클릭/키 입력에서 즉시 다시 재생합니다.
+          if (state === "intro" && currentBgm === a && a.paused) currentBgm = null;
+        });
       }
-    } catch {}
+    } catch {
+      if (state === "intro" && currentBgm === a && a.paused) currentBgm = null;
+    }
   }
 
   function applyVolumes() {
     for (const [key, a] of Object.entries(audio)) {
-      const isBgm = key.includes("Bgm") || key.startsWith("stage");
+      const isBgm = isBgmKey(key);
       a.volume = isBgm ? bgmEffectiveVolume() : sfxVolume;
     }
     if (currentBgm) currentBgm.volume = bgmEffectiveVolume();
@@ -284,17 +318,22 @@
   }
 
   function playBgm(key) {
-    if (!audioUnlocked) return;
+    if (!audioUnlocked && key !== "introBgm") return;
+    if (key === "introBgm" && state === "intro") { playIntroBgmDirect(); return; }
     const a = audio[key];
     if (!a) return;
-    if (currentBgm === a) return;
+    if (currentBgm === a && !a.paused) return;
     stopBgm();
     currentBgm = a;
     try {
+      a.muted = false;
       a.volume = bgmEffectiveVolume();
       a.currentTime = 0;
-      a.play().catch(()=>{});
-    } catch {}
+      const p = a.play();
+      if (p && p.catch) p.catch(() => { if (currentBgm === a && a.paused) currentBgm = null; });
+    } catch {
+      if (currentBgm === a && a.paused) currentBgm = null;
+    }
   }
 
   function switchBgmForState() {
@@ -733,12 +772,7 @@
   }
 
   function fullscreenButtonRect() {
-    if (state === "intro") {
-      return { id: "fullscreenToggle", x: 18, y: 654, w: 154, h: 46, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
-    }
-    // 인트로 이후 화면에서는 우측 하단 BGM 볼륨 아이콘 위에 작은 아이콘으로 표시
-    const mr = menuRect();
-    return { id: "fullscreenToggle", x: mr.x + 28, y: mr.y - 118, w: 48, h: 48, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
+    return { id: "fullscreenToggle", x: 18, y: 654, w: 154, h: 46, color: "#bfe8ff", label: document.fullscreenElement ? "전체화면 해제" : "전체화면" };
   }
 
   function toggleFullscreen() {
@@ -751,70 +785,24 @@
     if (state === "loading" || menuOpen) return;
     const r = fullscreenButtonRect();
     const hovered = inRect(mouse, r);
-    const label = document.fullscreenElement ? "전체화면 해제" : "전체화면";
-
     ctx.save();
-    if (state === "intro") {
-      ctx.fillStyle = hovered ? "rgba(139,223,255,.18)" : "rgba(0,0,0,.40)";
-      ctx.strokeStyle = hovered ? "rgba(190,232,255,.96)" : "rgba(255,255,255,.55)";
-      ctx.lineWidth = hovered ? 2.8 : 1.6;
-      ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
-      ctx.shadowBlur = hovered ? 16 : 0;
-      roundRect(r.x, r.y, r.w, r.h, 15);
-      ctx.fill();
-      ctx.stroke();
-      if (hovered) {
-        ctx.globalAlpha = .18;
-        ctx.fillStyle = "#bfe8ff";
-        roundRect(r.x, r.y, r.w, r.h, 15);
-        ctx.fill();
-      }
-      ctx.restore();
-      drawText(label, r.x + r.w / 2, r.y + r.h / 2, 19, hovered ? "#bfe8ff" : "#fff", "center", true);
-      return;
-    }
-
-    // 작은 전체화면 아이콘 버튼
-    ctx.fillStyle = hovered ? "rgba(190,232,255,.22)" : "rgba(0,0,0,.46)";
-    ctx.strokeStyle = hovered ? "rgba(190,232,255,.98)" : "rgba(255,255,255,.55)";
-    ctx.lineWidth = hovered ? 2.4 : 1.4;
+    ctx.fillStyle = hovered ? "rgba(139,223,255,.18)" : "rgba(0,0,0,.40)";
+    ctx.strokeStyle = hovered ? "rgba(190,232,255,.96)" : "rgba(255,255,255,.55)";
+    ctx.lineWidth = hovered ? 2.8 : 1.6;
     ctx.shadowColor = hovered ? "#8bdfff" : "transparent";
     ctx.shadowBlur = hovered ? 16 : 0;
-    roundRect(r.x, r.y, r.w, r.h, 14);
+    roundRect(r.x, r.y, r.w, r.h, 15);
     ctx.fill();
     ctx.stroke();
-
-    if (assets.fullscreenIcon) {
-      ctx.globalAlpha = hovered ? 1 : .88;
-      ctx.drawImage(assets.fullscreenIcon, r.x + 9, r.y + 9, r.w - 18, r.h - 18);
-      ctx.globalAlpha = 1;
-    } else {
-      drawText("⛶", r.x + r.w / 2, r.y + r.h / 2, 28, "#ffffff", "center", true);
-    }
-
     if (hovered) {
-      const bx = Math.max(14, r.x - 190);
-      const by = r.y + 4;
-      const bw = 180;
-      const bh = 40;
-      ctx.fillStyle = "rgba(0,0,0,.58)";
-      ctx.strokeStyle = "rgba(190,232,255,.90)";
-      ctx.lineWidth = 2;
-      ctx.shadowColor = "#8bdfff";
-      ctx.shadowBlur = 12;
-      roundRect(bx, by, bw, bh, 14);
-      ctx.fill();
-      ctx.stroke();
-      ctx.globalAlpha = .16;
+      ctx.globalAlpha = .18;
       ctx.fillStyle = "#bfe8ff";
-      roundRect(bx, by, bw, bh, 14);
+      roundRect(r.x, r.y, r.w, r.h, 15);
       ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-      drawText(label, bx + bw / 2, by + bh / 2, 18, "#e8fbff", "center", true);
-      return;
     }
     ctx.restore();
+    const label = document.fullscreenElement ? "전체화면 해제" : "전체화면";
+    drawText(label, r.x + r.w / 2, r.y + r.h / 2, 19, hovered ? "#bfe8ff" : "#fff", "center", true);
   }
 
   function floatingBgmIconRect() {
@@ -934,6 +922,9 @@
   }
 
   function nextIntroScene() {
+    // 인트로 BGM은 모바일 크롬에서도 사용자의 클릭/터치/키 입력 직후 바로 재생되도록 보강합니다.
+    unlockAudio();
+    if (state === "intro") playIntroBgmDirect();
     playSfx("select", .8);
     if (introIndex < 5) {
       introIndex++;
@@ -1677,7 +1668,7 @@
     if (floatingBgmOpen(p) && inRect(p, floatingBgmSliderRect())) { setFloatingBgmVolumeFromX(p.x); return; }
     if (inRect(p, fullscreenButtonRect())) { toggleFullscreen(); return; }
     if (state === "intro") {
-      if (inRect(p, introSkipRect())) { goTitleFromIntro(); return; }
+      if (inRect(p, introSkipRect())) { unlockAudio(); playIntroBgmDirect(); goTitleFromIntro(); return; }
       if (introVolumeOpen(p) && inRect(p, introVolumeSliderRect())) { setIntroVolumeFromX(p.x); return; }
       if (inRect(p, introNextRect())) { nextIntroScene(); return; }
       return;
@@ -1778,9 +1769,19 @@
   });
 
 
-  window.addEventListener("pointerdown", () => {
-    if (state === "intro" || state === "title") unlockAudio();
-  }, { once: true });
+  function handleGlobalAudioGesture() {
+    if (state === "intro") {
+      unlockAudio();
+      playIntroBgmDirect();
+    } else if (state === "title" && !audioUnlocked) {
+      unlockAudio();
+    }
+  }
+
+  window.addEventListener("pointerdown", handleGlobalAudioGesture, { capture: true, passive: true });
+  window.addEventListener("touchstart", handleGlobalAudioGesture, { capture: true, passive: true });
+  window.addEventListener("mousedown", handleGlobalAudioGesture, { capture: true, passive: true });
+  window.addEventListener("keydown", handleGlobalAudioGesture, { capture: true });
 
   function startSingle() {
     gameMode = "single";
