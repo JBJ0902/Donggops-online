@@ -14,7 +14,7 @@ const SHEETS = {
 
 const HEADERS = {
   users: ['user_id', 'google_email', 'google_name', 'nickname', 'picture', 'created_at', 'last_login_at'],
-  user_settings: ['user_id', 'key_hit', 'key_star', 'key_auto', 'bgm_volume', 'sfx_volume', 'bgm_muted', 'updated_at'],
+  user_settings: ['user_id', 'key_hit', 'key_star', 'key_auto', 'bgm_volume', 'sfx_volume', 'bgm_muted', 'sfx_muted', 'updated_at'],
   competition_scores: ['score_id', 'user_id', 'nickname', 'character', 'reached_stage', 'total_score', 'best_cpm', 'best_combo', 'play_time', 'created_at']
 };
 
@@ -146,7 +146,8 @@ function getSettings_(userId) {
     keyConfig: { hit: v[1] || ' ', star: v[2] || 'b', auto: v[3] || '5' },
     bgmVolume: Number(v[4] || 0.4),
     sfxVolume: Number(v[5] || 0.3),
-    bgmMuted: String(v[6]) === 'true'
+    bgmMuted: String(v[6]) === 'true',
+    sfxMuted: String(v[7]) === 'true'
   };
 }
 
@@ -161,6 +162,7 @@ function saveSettings_(userId, settings) {
     clamp_(Number(settings.bgmVolume), 0, 1, 0.4),
     clamp_(Number(settings.sfxVolume), 0, 1, 0.3),
     !!settings.bgmMuted,
+    !!settings.sfxMuted,
     new Date().toISOString()
   ];
   const row = findRowByFirstCol_(sh, userId);

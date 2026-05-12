@@ -75,6 +75,10 @@
     donggopIcon: "assets/images/excuse_icon.webp",
     enterKey: "assets/images/enter_key.webp",
     spaceKey: "assets/images/space_key.webp",
+    modeSingle: "assets/images/mode_single_ai.webp",
+    modeOnline: "assets/images/mode_online_vs.webp",
+    modeCompetition: "assets/images/mode_user_competition.webp",
+    modeRank: "assets/images/mode_online_rank.webp",
   };
 
   const audio = {};
@@ -1460,10 +1464,26 @@
 
   function modeOptionRects() {
     return [
-      { id: "single", x: 315, y: 337, w: 650, h: 52, color: "#8bdfff", label: "싱글 플레이 AI 대전" },
-      { id: "online", x: 360, y: 395, w: 560, h: 54, color: "#ffd6ff", label: "ONLINE 1:1 대전" },
-      { id: "competition", x: 340, y: 454, w: 600, h: 54, color: "#fff0a8", label: "사용자 경쟁전" },
-      { id: "competitionRank", x: 340, y: 512, w: 600, h: 42, color: "#bfffe0", label: "사용자 온라인 경쟁전 순위 보기" },
+      {
+        id: "single", x: 88, y: 144, w: 500, h: 200, color: "#65b5ff", image: "modeSingle",
+        label: "싱글 플레이 AI 대전", shortLabel: "AI 대전", key: "ENTER / SPACE",
+        desc1: "기존 1~5 스테이지", desc2: "혼자 즐기는 기본 모드"
+      },
+      {
+        id: "online", x: 608, y: 144, w: 500, h: 200, color: "#ff7ad6", image: "modeOnline",
+        label: "ONLINE 1:1 대전", shortLabel: "온라인 매치", key: "O",
+        desc1: "WebRTC 1:1 직접 대전", desc2: "로비 · 채팅 · READY"
+      },
+      {
+        id: "competition", x: 88, y: 382, w: 500, h: 200, color: "#fff0a8", image: "modeCompetition",
+        label: "사용자 경쟁전", shortLabel: "경쟁전", key: "C",
+        desc1: "1~10 스테이지 도전", desc2: "랭킹 기록 저장"
+      },
+      {
+        id: "competitionRank", x: 608, y: 382, w: 500, h: 200, color: "#bfffe0", image: "modeRank",
+        label: "사용자 온라인 경쟁전 순위 보기", shortLabel: "순위 보기", key: "R",
+        desc1: "외부 경쟁전 순위", desc2: "1위부터 100위까지 확인"
+      },
     ];
   }
 
@@ -1831,6 +1851,99 @@
       else drawText("🔊", icon.x + icon.w/2, icon.y + icon.h/2, 24, "#fff", "center", false);
     }
     ctx.restore();
+  }
+
+  function drawModeCard(card) {
+    const hovered = inRect(mouse, card);
+    const t = nowSec();
+    const dy = hovered ? -8 : 0;
+    const x = card.x, y = card.y + dy, w = card.w, h = card.h;
+    const glow = hovered ? 28 + Math.sin(t * 8) * 7 : 10;
+
+    ctx.save();
+    ctx.shadowColor = card.color;
+    ctx.shadowBlur = glow;
+    ctx.fillStyle = hovered ? "rgba(10,10,32,.78)" : "rgba(0,0,0,.58)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.62)";
+    ctx.lineWidth = hovered ? 3.5 : 2;
+    roundRect(x, y, w, h, 24);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    const imgBox = { x: x + 16, y: y + 17, w: 220, h: 165 };
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.64)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.48)";
+    ctx.lineWidth = hovered ? 2.4 : 1.4;
+    ctx.shadowColor = hovered ? card.color : "transparent";
+    ctx.shadowBlur = hovered ? 16 : 0;
+    roundRect(imgBox.x, imgBox.y, imgBox.w, imgBox.h, 18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    roundRect(imgBox.x + 4, imgBox.y + 4, imgBox.w - 8, imgBox.h - 8, 15);
+    ctx.clip();
+    drawImageContain(assets[card.image], imgBox.x + 4, imgBox.y + 4, imgBox.w - 8, imgBox.h - 8);
+    ctx.restore();
+
+    if (hovered) {
+      ctx.save();
+      const shine = ctx.createLinearGradient(x, y, x + w, y + h);
+      shine.addColorStop(0, "rgba(255,255,255,.02)");
+      shine.addColorStop(.5, "rgba(255,255,255,.16)");
+      shine.addColorStop(1, "rgba(255,255,255,.03)");
+      ctx.fillStyle = shine;
+      roundRect(x + 4, y + 4, w - 8, h - 8, 20);
+      ctx.fill();
+      ctx.restore();
+      drawSmallVfxAroundRect({ x, y, w, h }, card.color);
+    }
+
+    const tx = x + 260;
+    const titleSize = card.id === "competitionRank" ? 23 : 25;
+    drawText(card.shortLabel, tx + 105, y + 43, titleSize, card.color, "center", true);
+    drawText(card.label, tx + 105, y + 78, card.id === "competitionRank" ? 15 : 17, "#ffffff", "center", true);
+    drawText(card.desc1, tx + 105, y + 113, 15, "#e9f6ff", "center", true);
+    drawText(card.desc2, tx + 105, y + 139, 15, "#fff0a8", "center", true);
+
+    ctx.save();
+    ctx.fillStyle = hovered ? "rgba(255,255,255,.20)" : "rgba(0,0,0,.46)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.50)";
+    ctx.lineWidth = hovered ? 2.2 : 1.3;
+    roundRect(tx + 34, y + 158, 142, 30, 15);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText(card.key, tx + 105, y + 173, card.key.length > 3 ? 13 : 18, "#fff0a8", "center", true);
+  }
+
+  function drawModeMenuUI() {
+    drawImageCover(assets.bg,0,0,W,H);
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.42)";
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    drawPanel(55, 58, 1085, 602);
+    drawText("동꼽즈 게임 모드", W/2, 98, 42, "#ffffff");
+    drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 138, 24, "#fff0a8");
+
+    const cards = modeOptionRects();
+    for (const card of cards) drawModeCard(card);
+
+    const hovered = cards.find(r => inRect(mouse, r));
+    if (hovered) {
+      drawHoverSelectBox({ x: hovered.x, y: hovered.y - 8, w: hovered.w, h: hovered.h, color: hovered.color }, 0.10);
+      titleClickFlashX = hovered.x + hovered.w / 2;
+      titleClickFlashY = hovered.y + hovered.h / 2;
+      titleClickFlashColor = hovered.color;
+    }
+
+    drawText("마우스로 카드 선택 또는 단축키 입력", W/2, 622, 19, "#bfe8ff");
+    drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 648, 18, "#fff0a8");
+    if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 676, 17, "#ffb0b0");
   }
 
   function drawIntroScreen() {
@@ -2480,6 +2593,7 @@
     if (state === "mode") {
       const opt = modeOptionRects().find(r => inRect(p, r));
       if (opt) {
+        playSfx("select", 1.05);
         if (opt.id === "single") startSingle();
         else if (opt.id === "online") openConnectionPanel();
         else if (opt.id === "competition") startCompetition();
@@ -3095,10 +3209,10 @@
       return;
     }
     if (state === "mode") {
-      if (e.key === "Enter" || e.key === " ") startSingle();
-      if (k === "o") openConnectionPanel();
-      if (k === "c") startCompetition();
-      if (k === "r") openCompetitionRankPage();
+      if (e.key === "Enter" || e.key === " ") { playSfx("select", 1.05); startSingle(); }
+      if (k === "o") { playSfx("select", 1.05); openConnectionPanel(); }
+      if (k === "c") { playSfx("select", 1.05); startCompetition(); }
+      if (k === "r") { playSfx("select", 1.05); openCompetitionRankPage(); }
       return;
     }
     if (state === "playing") {
@@ -3985,17 +4099,7 @@
       drawText("A / ← : 슈니    D / → : 다시바", W/2, 620, 34, "#fff0a8");
       drawText(`현재 선택: ${chars[currentSelectVisualChar()].name}`, W/2, 670, 30, "#fff");
     } else if (state === "mode") {
-      drawImageCover(assets.bg,0,0,W,H);
-      drawPanel(205,145,870,455);
-      drawText("동꼽즈 게임 모드", W/2, 205, 48, "#fff");
-      drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 270, 31, "#fff0a8");
-      for (const r of modeOptionRects()) if (inRect(mouse, r)) { drawHoverSelectBox(r, 0.18); drawSmallVfxAroundRect(r, r.color); }
-      drawText("ENTER / SPACE : 싱글 플레이 AI 대전", W/2, 370, 31, "#bfe8ff");
-      drawText("O : ONLINE 1:1 대전", W/2, 425, 31, "#ffd6ff");
-      drawText("C : 사용자 경쟁전", W/2, 482, 31, "#fff0a8");
-      drawText("R : 사용자 온라인 경쟁전 순위 보기", W/2, 535, 24, "#bfffe0");
-      drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 580, 20, "#fff0a8");
-      if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 588, 18, "#ffb0b0");
+      drawModeMenuUI();
     } else if (state === "connected") {
       drawImageCover(assets.bg,0,0,W,H);
       drawPanel(270,220,740,260);
