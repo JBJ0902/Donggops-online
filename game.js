@@ -102,6 +102,11 @@
   let keyConfig = { hit: " ", star: "b", auto: "5" };
   let waitingKeyAction = null;
 
+  const STAR_SKILL_NAME = "별풍 리액션 러시";
+  const AUTO_SKILL_NAME = "동꼽 자동사냥";
+  const heldGameplayKeys = new Set();
+  let repeatGuardHintAt = 0;
+
   function makeAudio(key, src, volume, loop=false) {
     const a = new Audio(src);
     a.preload = "auto";
@@ -209,6 +214,28 @@
 
   function keyMatch(e, key) {
     return normalizeGameKey(e) === key;
+  }
+
+  function clearGameplayHeldKeys() {
+    heldGameplayKeys.clear();
+  }
+
+  function blockGameplayHoldRepeat(e, actionName="") {
+    const nk = normalizeGameKey(e);
+    if (!nk) return false;
+    if (e.repeat || heldGameplayKeys.has(nk)) {
+      if (state === "playing" && local && nowSec() - repeatGuardHintAt > 1.15) {
+        repeatGuardHintAt = nowSec();
+        const x = local.side === "left" ? 330 : 950;
+        const msg = actionName === "auto"
+          ? "자동사냥은 1번 입력으로만 사용!"
+          : "꾹누르기 무효! 순수 연타만 인정";
+        addText(x, 382, msg, "#fff0a8", 22, .75);
+      }
+      return true;
+    }
+    heldGameplayKeys.add(nk);
+    return false;
   }
 
   function bgmEffectiveVolume() {
@@ -358,6 +385,7 @@
 
   function setState(s) {
     state = s;
+    if (s !== "playing") clearGameplayHeldKeys();
     switchBgmForState();
     if (s === "intro") tryTitleAutoplay();
   }
@@ -584,9 +612,10 @@
       drawText("게임 설명", W/2, 225, 32, "#bfe8ff");
       const lines = [
         "목표: 제한시간 안에 상대보다 동전을 많이 꼽으면 승리합니다.",
-        `${keyLabel(keyConfig.hit)}: 동꼽 / ${keyLabel(keyConfig.star)}: 별풍선 터짐(B활성) 때 사용 / ${keyLabel(keyConfig.auto)}: 동꼽(자동사냥) 사용`,
-        `별풍선: ${keyLabel(keyConfig.hit)} 순수 키보드 연타 660CPM 이상을 5초 유지하면 ${keyLabel(keyConfig.star)}키 활성 + 자동 +500CPM`,
-        "동꼽(자동사냥): 1000CPM 3초 유지 시 획득, 사용하면 13초간 자동 +300CPM",
+        `${keyLabel(keyConfig.hit)}: 동꼽 / ${keyLabel(keyConfig.star)}: ${STAR_SKILL_NAME} 활성 중 1회 입력 / ${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} 사용`,
+        `꾹누르기 자동연타는 무효이며, 순수 키 입력만 연타로 인정됩니다.`,
+        `별풍선: ${keyLabel(keyConfig.hit)} 순수 연타 660CPM 이상을 5초 유지하면 ${STAR_SKILL_NAME} 10초 발동 + 자동 +500CPM`,
+        `${AUTO_SKILL_NAME}: 1000CPM 3초 유지 시 획득, 사용하면 13초간 자동 +300CPM`,
         "싱글 AI 대전은 플레이어가 400점 이상 앞서면 AI가 추격 모드로 들어갑니다.",
         "5스테이지는 3회 실패하면 자동으로 초기화면으로 돌아갑니다."
       ];
@@ -606,7 +635,7 @@
       const keyRows = [
         ["setHitKey", "동꼽 키", keyConfig.hit],
         ["setStarKey", "별풍선 키", keyConfig.star],
-        ["setAutoKey", "동꼽(자동사냥) 키", keyConfig.auto],
+        ["setAutoKey", `${AUTO_SKILL_NAME} 키`, keyConfig.auto],
       ];
       let y = 318;
       for (const [id, label, key] of keyRows) {
@@ -1942,7 +1971,7 @@
       if (player.fTimer <= 0) {
         player.fUnlocked = false;
         player.fCooldown = F_COOLDOWN;
-        if (isLocal) addText(330, 250, "B 키 종료", "#ffe0b0", 26, .9);
+        if (isLocal) addText(330, 250, `${STAR_SKILL_NAME} 종료`, "#ffe0b0", 26, .9);
       }
     } else if (player.fCooldown > 0) player.fCooldown = Math.max(0, player.fCooldown - dt);
 
@@ -1969,7 +1998,7 @@
         player.starEarned++;
         player.starPopup = 2.0;
         fountain(330, 330);
-        addText(330, 230, "별풍선 터짐! B활성 +500CPM", "#ffd6ff", 32, 1.2);
+        addText(330, 230, `${STAR_SKILL_NAME}! 10초 +500CPM`, "#ffd6ff", 32, 1.2);
         playSfx("starActivate", 1.15);
         sendMsg({ type: "item", item: "star" });
       }
@@ -1981,10 +2010,10 @@
         if (player.donggopItems < 5) {
           player.donggopItems++;
           player.donggopEarned++;
-          addText(330, 305, "동꼽(자동사냥) 획득! 5번", "#bfe8ff", 28, 1.0);
+          addText(330, 305, `${AUTO_SKILL_NAME} 획득! 5번`, "#bfe8ff", 28, 1.0);
           playSfx("ready");
         } else {
-          addText(330, 305, "동꼽(자동사냥) 최대 5개", "#ffd08a", 26, .9);
+          addText(330, 305, `${AUTO_SKILL_NAME} 최대 5개`, "#ffd08a", 26, .9);
         }
       }
 
@@ -2321,17 +2350,22 @@
       return;
     }
     if (state === "playing") {
-      if (keyMatch(e, keyConfig.hit) || (keyMatch(e, keyConfig.star) && local.fUnlocked)) {
-        hit(local, true, gameMode === "online", keyMatch(e, keyConfig.hit) ? keyLabel(keyConfig.hit) : keyLabel(keyConfig.star), true);
-      } else if (keyMatch(e, keyConfig.star) && !local.fUnlocked) {
+      const isHitKey = keyMatch(e, keyConfig.hit);
+      const isStarKey = keyMatch(e, keyConfig.star);
+      const isAutoKey = keyMatch(e, keyConfig.auto);
+      if ((isHitKey || isStarKey || isAutoKey) && blockGameplayHoldRepeat(e, isAutoKey ? "auto" : (isStarKey ? "star" : "hit"))) return;
+
+      if (isHitKey || (isStarKey && local.fUnlocked)) {
+        hit(local, true, gameMode === "online", isHitKey ? keyLabel(keyConfig.hit) : keyLabel(keyConfig.star), true);
+      } else if (isStarKey && !local.fUnlocked) {
         addText(330, 255, local.fCooldown > 0 ? `${keyLabel(keyConfig.star)} 쿨타임 ${local.fCooldown.toFixed(1)}s` : `${keyLabel(keyConfig.star)} 키 잠김`, "#ffc88a", 26, .8);
-      } else if (keyMatch(e, keyConfig.auto)) {
-        if (local.fUnlocked) addText(330, 300, `자동사냥은 ${keyLabel(keyConfig.star)}와 중복 불가`, "#ffd08a", 25, .9);
-        else if (local.donggopItems <= 0) addText(330, 300, "동꼽(자동사냥) 없음", "#eee", 25, .8);
+      } else if (isAutoKey) {
+        if (local.fUnlocked) addText(330, 300, `${AUTO_SKILL_NAME}은 ${STAR_SKILL_NAME}과 중복 불가`, "#ffd08a", 25, .9);
+        else if (local.donggopItems <= 0) addText(330, 300, `${AUTO_SKILL_NAME} 없음`, "#eee", 25, .8);
         else {
           local.donggopItems--;
           local.donggopBuffs.push(DONGGOP_DURATION);
-          addText(330, 300, "동꼽(자동사냥) 발동! +300CPM", "#bfe8ff", 32, 1.0);
+          addText(330, 300, `${AUTO_SKILL_NAME} 발동! 13초 +300CPM`, "#bfe8ff", 32, 1.0);
           playSfx("item");
           sendMsg({ type: "item", item: "donggop" });
         }
@@ -2356,6 +2390,14 @@
     const nk = normalizeGameKey(e);
     if (state === "intro" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
     handleKey(e);
+  });
+
+  window.addEventListener("keyup", (e) => {
+    heldGameplayKeys.delete(normalizeGameKey(e));
+  });
+
+  window.addEventListener("blur", () => {
+    clearGameplayHeldKeys();
   });
 
   function update(dt) {
@@ -2638,7 +2680,7 @@
     const starActive = !!local.fUnlocked;
     const autoFull = local.donggopItems >= 5;
     const bStatus = starActive
-      ? `별풍선 터짐(${keyLabel(keyConfig.star)}키 활성) ${local.fTimer.toFixed(1)}s`
+      ? `${STAR_SKILL_NAME}(${keyLabel(keyConfig.star)}키) ${local.fTimer.toFixed(1)}s`
       : local.fCooldown > 0
         ? `별풍선 안터짐(${keyLabel(keyConfig.star)}쿨 ${local.fCooldown.toFixed(1)}s)`
         : `별풍선 안터짐(${keyLabel(keyConfig.star)}잠김)`;
@@ -2664,11 +2706,15 @@
     }
     const autoPalette = ["#fff0a8", "#8bdfff", "#ffffff", "#ffd6ff"];
     const autoColor = autoFull ? autoPalette[Math.floor(tHud * 6) % autoPalette.length] : (local.donggopItems > 0 ? "#ffe5a8" : "#ffffff");
-    drawText(`${keyLabel(keyConfig.auto)}: 동꼽(자동사냥) x${local.donggopItems}/5`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
+    drawText(`${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} x${local.donggopItems}/5`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
     if (autoFull) {
       drawMiniHudSparkles(autoBox.x, autoBox.y, autoBox.w, autoBox.h, tHud + 0.61, "auto");
       drawText("READY!", autoBox.x + autoBox.w - 40, autoBox.y - 6, 13, "#bfffe0");
     }
+
+    // 키 안내 영역과 게이지 영역을 구분하는 얇은 라인
+    // 별풍선/자동사냥 활성 VFX 박스 아래쪽에 살짝 띄워서 글자·게이지와 겹치지 않게 배치
+    drawHudSectionDivider(245, 628, 790);
 
     const manual = cpm(local, true);
     const cpmRatio = Math.max(0, Math.min(1, manual / STAR_THRESHOLD));
@@ -2694,6 +2740,40 @@
 
     drawText(`자동사냥: ${dong}`, 470, 695, 15, "#ffe5a8");
     drawText(`피버: ${fever}`, 810, 695, 15, "#ffd6ff");
+  }
+
+  function drawHudSectionDivider(x, y, w) {
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+
+    // 가운데는 또렷하고 양끝은 자연스럽게 사라지는 네온 구분선
+    const grad = ctx.createLinearGradient(x, y, x + w, y);
+    grad.addColorStop(0, "rgba(255,255,255,0)");
+    grad.addColorStop(0.12, "rgba(191,232,255,.36)");
+    grad.addColorStop(0.5, "rgba(255,240,168,.54)");
+    grad.addColorStop(0.88, "rgba(191,232,255,.36)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+
+    ctx.shadowColor = "rgba(191,232,255,.65)";
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.stroke();
+
+    // 너무 강하지 않은 하단 보조선으로 패널 내부 구획감을 추가
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = "rgba(255,255,255,.28)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 48, y + 5);
+    ctx.lineTo(x + w - 48, y + 5);
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   function drawBar(x, y, w, h, ratio, color, glowColor=null) {
