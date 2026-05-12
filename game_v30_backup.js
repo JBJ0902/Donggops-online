@@ -13,13 +13,6 @@
     { no: 3, name: "3스테이지", duration: 180, rank: "보통", ai: 760 },
     { no: 4, name: "4스테이지", duration: 210, rank: "어려움", ai: 970 },
     { no: 5, name: "5스테이지", duration: 300, rank: "매우 어려움", ai: 1210 },
-    // 사용자 경쟁전 전용 6~10 스테이지. BGM 파일은 추후 stage6~stage10으로 추가 가능하며,
-    // 현재는 stage5 BGM을 안전하게 재사용합니다.
-    { no: 6, name: "6스테이지", duration: 240, rank: "초고수", ai: 1420 },
-    { no: 7, name: "7스테이지", duration: 270, rank: "프로", ai: 1640 },
-    { no: 8, name: "8스테이지", duration: 300, rank: "마스터", ai: 1880 },
-    { no: 9, name: "9스테이지", duration: 300, rank: "레전드", ai: 2140 },
-    { no: 10, name: "10스테이지", duration: 300, rank: "동꼽신", ai: 2420 },
   ];
 
   const STAR_THRESHOLD = 660;
@@ -108,34 +101,6 @@
   let bgmMuted = false;
   let keyConfig = { hit: " ", star: "b", auto: "5" };
   let waitingKeyAction = null;
-
-  // Google ID 로그인 + Google Sheets(Apps Script) 연동 설정
-  // 1) GOOGLE_CLIENT_ID는 Google Cloud OAuth 클라이언트 ID입니다.
-  // 2) APPS_SCRIPT_WEBAPP_URL은 Apps Script를 웹앱으로 배포한 뒤 받은 /exec URL로 교체하세요.
-  //    URL을 교체하기 전에는 Google 로그인은 로컬 프로필로만 동작하고, 랭킹은 기존 localStorage를 사용합니다.
-  const GOOGLE_CLIENT_ID = "1005600552830-ffbq5n0nsucf35lrllqkvpel13fth8nd.apps.googleusercontent.com";
-  const APPS_SCRIPT_WEBAPP_URL = "YOUR_APPS_SCRIPT_WEBAPP_URL";
-  let currentGoogleIdToken = "";
-  let googleProfile = null;
-  let googleLoginPanelEl = null;
-  let googleIdInitialized = false;
-  let remoteSettingsTimer = 0;
-  let remoteNoticeCooldown = 0;
-
-  // GitHub Pages 전용 로컬 계정/기록 저장소
-  // 서버 DB 없이 브라우저 localStorage에 저장합니다. 같은 브라우저/기기 안에서 사용자별 설정과 기록을 분리합니다.
-  const ACCOUNT_STORE_KEY = "donggop_accounts_v1";
-  const SESSION_KEY = "donggop_current_user_v1";
-  const LEADERBOARD_KEY = "donggop_competition_leaderboard_v1";
-  let accounts = {};
-  let currentUserId = "";
-  let accountButtons = [];
-  let loginNotice = "";
-  let loginNoticeTimer = 0;
-  let leaderboardScroll = 0;
-  let recordsScroll = 0;
-  let competitionSaved = false;
-  let competitionLastWarnAt = 0;
 
   const STAR_SKILL_NAME = "별풍 리액션 러시";
   const AUTO_SKILL_NAME = "동꼽 자동사냥";
@@ -278,9 +243,8 @@
   }
 
   function loadSettings() {
-    keyConfig = { hit: " ", star: "b", auto: "5" };
     try {
-      const saved = JSON.parse(localStorage.getItem(settingsStorageKey()) || localStorage.getItem("donggop_settings") || "{}");
+      const saved = JSON.parse(localStorage.getItem("donggop_settings") || "{}");
       if (typeof saved.bgmVolume === "number") bgmVolume = Math.max(0, Math.min(1, saved.bgmVolume));
       if (typeof saved.sfxVolume === "number") sfxVolume = Math.max(0, Math.min(1, saved.sfxVolume));
       if (typeof saved.bgmMuted === "boolean") bgmMuted = saved.bgmMuted;
@@ -294,524 +258,8 @@
 
   function saveSettings() {
     try {
-      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, keyConfig }));
+      localStorage.setItem("donggop_settings", JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, keyConfig }));
     } catch {}
-    queueRemoteSettingsSave();
-  }
-
-
-  function simpleHash(str) {
-    let h1 = 0x811c9dc5;
-    const txt = String(str || "");
-    for (let i = 0; i < txt.length; i++) {
-      h1 ^= txt.charCodeAt(i);
-      h1 = Math.imul(h1, 0x01000193) >>> 0;
-    }
-    return h1.toString(16).padStart(8, "0") + ":" + btoa(unescape(encodeURIComponent(txt))).slice(0, 12);
-  }
-
-  function loadAccounts() {
-    try { accounts = JSON.parse(localStorage.getItem(ACCOUNT_STORE_KEY) || "{}"); } catch { accounts = {}; }
-    try {
-      const savedUser = localStorage.getItem(SESSION_KEY) || "";
-      if (savedUser && accounts[savedUser]) currentUserId = savedUser;
-    } catch {}
-  }
-
-  function saveAccounts() {
-    try { localStorage.setItem(ACCOUNT_STORE_KEY, JSON.stringify(accounts)); } catch {}
-    try {
-      if (currentUserId) localStorage.setItem(SESSION_KEY, currentUserId);
-      else localStorage.removeItem(SESSION_KEY);
-    } catch {}
-  }
-
-  function validateAccountId(id) {
-    return /^[A-Za-z0-9]{4,18}$/.test(String(id || ""));
-  }
-
-  function validatePassword(pw) {
-    return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d]{10,18}$/.test(String(pw || ""));
-  }
-
-  function currentAccount() {
-    return currentUserId && accounts[currentUserId] ? accounts[currentUserId] : null;
-  }
-
-  function currentNickname() {
-    const acc = currentAccount();
-    return acc ? sanitizePlayerName(acc.nickname || acc.id) : "";
-  }
-
-  function settingsStorageKey() {
-    return currentUserId ? `donggop_settings_user_${currentUserId}` : "donggop_settings";
-  }
-
-  function setLoginNotice(msg) {
-    loginNotice = msg || "";
-    loginNoticeTimer = loginNotice ? 3.2 : 0;
-  }
-
-  function remoteApiEnabled() {
-    return typeof APPS_SCRIPT_WEBAPP_URL === "string" &&
-      APPS_SCRIPT_WEBAPP_URL.startsWith("https://") &&
-      !APPS_SCRIPT_WEBAPP_URL.includes("YOUR_APPS_SCRIPT_WEBAPP_URL");
-  }
-
-  function base64UrlDecode(str) {
-    try {
-      const pad = "=".repeat((4 - (str.length % 4)) % 4);
-      const b64 = String(str || "").replace(/-/g, "+").replace(/_/g, "/") + pad;
-      return decodeURIComponent(Array.prototype.map.call(atob(b64), c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join(""));
-    } catch {
-      return "";
-    }
-  }
-
-  function decodeJwtPayload(token) {
-    try {
-      const part = String(token || "").split(".")[1];
-      if (!part) return null;
-      return JSON.parse(base64UrlDecode(part));
-    } catch {
-      return null;
-    }
-  }
-
-  function safeJsonParse(text) {
-    try { return JSON.parse(text || "{}"); } catch { return {}; }
-  }
-
-  async function remotePost(action, payload={}) {
-    if (!remoteApiEnabled()) return null;
-    const body = Object.assign({ action, idToken: currentGoogleIdToken, clientTime: new Date().toISOString() }, payload || {});
-    try {
-      const res = await fetch(APPS_SCRIPT_WEBAPP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(body)
-      });
-      const data = safeJsonParse(await res.text());
-      if (!data.ok && data.error) throw new Error(data.error);
-      return data;
-    } catch (err) {
-      if (nowSec() - remoteNoticeCooldown > 5) {
-        remoteNoticeCooldown = nowSec();
-        setLoginNotice("Google Sheets 동기화 실패 - 로컬 저장으로 계속 진행");
-      }
-      return null;
-    }
-  }
-
-  function applyRemoteSettings(settings) {
-    if (!settings || typeof settings !== "object") return;
-    if (typeof settings.bgmVolume === "number") bgmVolume = Math.max(0, Math.min(1, settings.bgmVolume));
-    if (typeof settings.sfxVolume === "number") sfxVolume = Math.max(0, Math.min(1, settings.sfxVolume));
-    if (typeof settings.bgmMuted === "boolean") bgmMuted = settings.bgmMuted;
-    if (settings.keyConfig) {
-      keyConfig.hit = settings.keyConfig.hit || keyConfig.hit;
-      keyConfig.star = settings.keyConfig.star || keyConfig.star;
-      keyConfig.auto = settings.keyConfig.auto || keyConfig.auto;
-    }
-    try {
-      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, keyConfig }));
-    } catch {}
-    applyVolumes();
-  }
-
-  function queueRemoteSettingsSave() {
-    if (!remoteApiEnabled() || !currentGoogleIdToken || !currentUserId) return;
-    clearTimeout(remoteSettingsTimer);
-    remoteSettingsTimer = setTimeout(() => {
-      remotePost("saveSettings", { settings: { bgmVolume, sfxVolume, bgmMuted, keyConfig } });
-    }, 700);
-  }
-
-  async function refreshRemoteLeaderboard() {
-    if (!remoteApiEnabled()) return;
-    const data = await remotePost("getLeaderboard", { limit: 100 });
-    if (data && Array.isArray(data.leaderboard)) saveLeaderboard(data.leaderboard);
-  }
-
-  async function syncGoogleLoginToRemote() {
-    if (!currentUserId || !currentGoogleIdToken) return;
-    const acc = currentAccount();
-    if (!acc) return;
-    if (!remoteApiEnabled()) {
-      setLoginNotice(`${acc.nickname} Google 로그인 완료 / Apps Script URL 미설정`);
-      return;
-    }
-    const loginData = await remotePost("login", {
-      nickname: acc.nickname,
-      profile: {
-        email: acc.googleEmail || "",
-        name: acc.googleName || acc.nickname || "",
-        picture: acc.googlePicture || ""
-      }
-    });
-    if (loginData && loginData.user && loginData.user.nickname) {
-      acc.nickname = sanitizePlayerName(loginData.user.nickname || acc.nickname);
-      localPlayerName = acc.nickname;
-      saveAccounts();
-    }
-    const settingsData = await remotePost("getSettings", {});
-    if (settingsData && settingsData.settings) applyRemoteSettings(settingsData.settings);
-    await refreshRemoteLeaderboard();
-    setLoginNotice(`${currentNickname()} Google 로그인 / Sheets 동기화 완료`);
-  }
-
-  function buildGoogleLoginPanel() {
-    if (googleLoginPanelEl) return googleLoginPanelEl;
-    const wrap = document.createElement("div");
-    wrap.id = "googleLoginOverlay";
-    wrap.className = "google-login-overlay hidden";
-    wrap.innerHTML = `
-      <div class="google-login-card" role="dialog" aria-modal="true" aria-labelledby="googleLoginTitle">
-        <h3 id="googleLoginTitle">동꼽즈 Google 로그인</h3>
-        <p>Google ID로 로그인하면 닉네임, 키 설정, 사용자 경쟁전 기록을 저장할 수 있습니다.</p>
-        <div id="googleLoginStatus" class="google-login-status hidden"></div>
-        <div id="googleSignInButton" style="display:grid; place-items:center; min-height:44px;"></div>
-        <button id="googleLoginClose" class="google-login-close" type="button" aria-label="Google 로그인 창 닫기">닫기</button>
-      </div>`;
-    document.body.appendChild(wrap);
-
-    // 캔버스 입력 처리보다 로그인 모달 닫기 처리를 우선합니다.
-    const forceClose = (e) => {
-      if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-      }
-      hideGoogleLoginPanel();
-      return false;
-    };
-    wrap.addEventListener("pointerdown", (e) => { if (e.target === wrap) forceClose(e); }, true);
-    wrap.addEventListener("click", (e) => { if (e.target === wrap) forceClose(e); }, true);
-    const closeBtn = wrap.querySelector("#googleLoginClose");
-    closeBtn.addEventListener("pointerdown", forceClose, true);
-    closeBtn.addEventListener("click", forceClose, true);
-    closeBtn.onclick = forceClose;
-
-    googleLoginPanelEl = wrap;
-    return googleLoginPanelEl;
-  }
-
-  function hideGoogleLoginPanel() {
-    if (googleLoginPanelEl) {
-      googleLoginPanelEl.classList.add("hidden");
-      const btn = googleLoginPanelEl.querySelector("#googleSignInButton");
-      if (btn) btn.innerHTML = "";
-    }
-  }
-
-  function isGoogleLoginAllowedOrigin() {
-    const protocol = location.protocol;
-    const host = location.hostname;
-    return protocol === "https:" || host === "localhost" || host === "127.0.0.1";
-  }
-
-  function setGoogleLoginStatus(message, warn=true) {
-    const panel = buildGoogleLoginPanel();
-    const box = panel.querySelector("#googleLoginStatus");
-    if (!box) return;
-    box.textContent = message || "";
-    box.className = message ? `google-login-status ${warn ? "warn" : "ok"}` : "google-login-status hidden";
-  }
-
-  function showGoogleLoginPanel() {
-    const panel = buildGoogleLoginPanel();
-    panel.classList.remove("hidden");
-    setGoogleLoginStatus("");
-
-    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
-      setGoogleLoginStatus("Google Client ID가 아직 설정되지 않았습니다.");
-      setLoginNotice("Google Client ID가 아직 설정되지 않았습니다");
-      return;
-    }
-
-    if (!isGoogleLoginAllowedOrigin()) {
-      setGoogleLoginStatus("로컬 파일(file://)에서는 Google 로그인이 차단됩니다. GitHub 도메인에서 접속하거나 LOCAL_TEST_START.bat로 localhost 테스트를 실행하세요.");
-      setLoginNotice("Google 로그인은 GitHub 도메인 또는 localhost에서 테스트하세요");
-      return;
-    }
-
-    if (!window.google || !google.accounts || !google.accounts.id) {
-      setGoogleLoginStatus("Google 로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요.");
-      setLoginNotice("Google 로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요");
-      return;
-    }
-
-    try {
-      if (!googleIdInitialized) {
-        google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: handleGoogleCredentialResponse,
-          auto_select: false,
-          cancel_on_tap_outside: true,
-          itp_support: true
-        });
-        googleIdInitialized = true;
-      }
-      const btn = panel.querySelector("#googleSignInButton");
-      btn.innerHTML = "";
-      google.accounts.id.renderButton(btn, {
-        theme: "filled_black",
-        size: "large",
-        type: "standard",
-        shape: "pill",
-        text: "signin_with",
-        locale: "ko"
-      });
-    } catch (err) {
-      console.warn("Google login render failed", err);
-      setGoogleLoginStatus("Google 로그인 버튼 초기화에 실패했습니다. 도메인 등록과 HTTPS 설정을 확인하세요.");
-    }
-  }
-
-  // 혹시 모달 버튼 이벤트가 다른 레이어에 가로막혀도 닫기 버튼은 항상 동작하게 보강합니다.
-  document.addEventListener("click", (e) => {
-    if (e.target && e.target.id === "googleLoginClose") {
-      e.preventDefault();
-      e.stopPropagation();
-      hideGoogleLoginPanel();
-    }
-  }, true);
-
-  function handleGoogleCredentialResponse(response) {
-    const token = response && response.credential ? String(response.credential) : "";
-    const payload = decodeJwtPayload(token);
-    if (!payload || !payload.sub) {
-      setLoginNotice("Google 로그인 토큰을 읽지 못했습니다");
-      return;
-    }
-    hideGoogleLoginPanel();
-    currentGoogleIdToken = token;
-    googleProfile = payload;
-    const uid = `google:${payload.sub}`;
-    let acc = accounts[uid];
-    if (!acc) {
-      const suggested = sanitizePlayerName(payload.name || (payload.email ? payload.email.split("@")[0] : "동꼽러"));
-      const nickInput = window.prompt("동꼽즈에서 사용할 닉네임을 입력하세요. 한글 12자 / 영문 18자 이내", suggested);
-      const nick = sanitizePlayerName(nickInput || suggested || "동꼽러");
-      acc = accounts[uid] = {
-        id: uid,
-        loginType: "google",
-        googleSub: payload.sub,
-        googleEmail: payload.email || "",
-        googleName: payload.name || "",
-        googlePicture: payload.picture || "",
-        nickname: nick,
-        createdAt: new Date().toISOString(),
-        records: [],
-        totals: { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 }
-      };
-    } else {
-      acc.loginType = "google";
-      acc.googleSub = payload.sub;
-      acc.googleEmail = payload.email || acc.googleEmail || "";
-      acc.googleName = payload.name || acc.googleName || "";
-      acc.googlePicture = payload.picture || acc.googlePicture || "";
-      acc.lastLoginAt = new Date().toISOString();
-    }
-    currentUserId = uid;
-    localPlayerName = sanitizePlayerName(acc.nickname || acc.googleName || "동꼽러");
-    saveAccounts();
-    loadSettings();
-    applyVolumes();
-    setLoginNotice(`${localPlayerName} Google 로그인 완료`);
-    syncGoogleLoginToRemote();
-  }
-
-  function promptCreateAccount() {
-    const id = window.prompt("계정 ID를 입력하세요. 영문/숫자 4~18자리", "");
-    if (id === null) return;
-    const uid = String(id).trim();
-    if (!validateAccountId(uid)) { setLoginNotice("ID는 영문/숫자 4~18자리만 가능"); return; }
-    if (accounts[uid]) { setLoginNotice("이미 존재하는 ID입니다"); return; }
-    const pw = window.prompt("PW를 입력하세요. 영문 대/소문자+숫자 조합 10~18자리", "");
-    if (pw === null) return;
-    if (!validatePassword(pw)) { setLoginNotice("PW는 영문 대/소문자+숫자 조합 10~18자리"); return; }
-    const nick = window.prompt("닉네임을 입력하세요. 한글 12자 / 영문 18자 이내", uid);
-    if (nick === null) return;
-    accounts[uid] = {
-      id: uid,
-      pwHash: simpleHash(uid + "|" + pw),
-      nickname: sanitizePlayerName(nick || uid),
-      createdAt: new Date().toISOString(),
-      records: [],
-      totals: { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 }
-    };
-    currentUserId = uid;
-    localPlayerName = accounts[uid].nickname;
-    saveAccounts();
-    loadSettings();
-    applyVolumes();
-    setLoginNotice(`${accounts[uid].nickname} 계정 생성/로그인 완료`);
-  }
-
-  function promptLoginAccount() {
-    const id = window.prompt("계정 ID를 입력하세요.", currentUserId || "");
-    if (id === null) return;
-    const uid = String(id).trim();
-    if (!accounts[uid]) { setLoginNotice("등록되지 않은 ID입니다"); return; }
-    const pw = window.prompt("PW를 입력하세요.", "");
-    if (pw === null) return;
-    if (accounts[uid].pwHash !== simpleHash(uid + "|" + pw)) { setLoginNotice("PW가 맞지 않습니다"); return; }
-    currentUserId = uid;
-    localPlayerName = sanitizePlayerName(accounts[uid].nickname || uid);
-    saveAccounts();
-    loadSettings();
-    applyVolumes();
-    setLoginNotice(`${localPlayerName} 로그인 완료`);
-  }
-
-  function logoutAccount() {
-    currentUserId = "";
-    currentGoogleIdToken = "";
-    googleProfile = null;
-    localPlayerName = "";
-    saveAccounts();
-    loadSettings();
-    applyVolumes();
-    setLoginNotice("로그아웃되었습니다");
-  }
-
-  function saveUserStageRecord(res, kind="stage") {
-    if (!currentUserId || !accounts[currentUserId] || !res) return;
-    const acc = accounts[currentUserId];
-    if (!Array.isArray(acc.records)) acc.records = [];
-    if (!acc.totals) acc.totals = { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 };
-    const rec = {
-      at: new Date().toISOString(),
-      kind,
-      mode: gameMode,
-      stage: res.stage,
-      win: !!res.win,
-      score: res.localScore || 0,
-      rivalScore: res.remoteScore || 0,
-      maxCpm: res.maxCpm || 0,
-      maxManualCpm: res.maxManualCpm || 0,
-      combo: res.combo || 0,
-      star: res.star || 0,
-      donggop: res.donggop || 0,
-      fever: res.fever || 0
-    };
-    acc.records.unshift(rec);
-    if (acc.records.length > 100) acc.records.length = 100;
-    acc.totals.plays = (acc.totals.plays || 0) + 1;
-    if (rec.win) acc.totals.wins = (acc.totals.wins || 0) + 1;
-    acc.totals.bestScore = Math.max(acc.totals.bestScore || 0, rec.score);
-    acc.totals.bestCpm = Math.max(acc.totals.bestCpm || 0, rec.maxCpm);
-    acc.totals.bestCombo = Math.max(acc.totals.bestCombo || 0, rec.combo);
-    acc.totals.bestStage = Math.max(acc.totals.bestStage || 0, rec.stage || 0);
-    saveAccounts();
-  }
-
-  function loadLeaderboard() {
-    try { return JSON.parse(localStorage.getItem(LEADERBOARD_KEY) || "[]"); } catch { return []; }
-  }
-
-  function saveLeaderboard(list) {
-    try { localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(list.slice(0, 100))); } catch {}
-  }
-
-  function totalRunScore(stats) {
-    return (stats || []).reduce((sum, r) => sum + (r.localScore || 0), 0);
-  }
-
-  function bestRunCpm(stats) {
-    return Math.max(0, ...((stats || []).map(r => r.maxCpm || 0)));
-  }
-
-  function bestRunCombo(stats) {
-    return Math.max(0, ...((stats || []).map(r => r.combo || 0)));
-  }
-
-  function maxAutoItemsForCurrentStage() {
-    // 일반/온라인/1~5스테이지는 5개 유지, 사용자 경쟁전 6~10스테이지는 6~10개까지 확장
-    if (gameMode === "competition") return Math.max(5, Math.min(10, STAGES[stageIndex]?.no || 5));
-    return 5;
-  }
-
-  function competitionDeficit() {
-    if (!(gameMode === "competition" && state === "playing" && local && remote)) return 0;
-    if (stageIndex > 4) return 0;
-    return Math.max(0, remote.score - local.score);
-  }
-
-  function maybeHandleCompetitionElimination() {
-    const deficit = competitionDeficit();
-    if (deficit < 500) return false;
-    const t = nowSec();
-    if (t - competitionLastWarnAt > 0.85) {
-      competitionLastWarnAt = t;
-      playSfx("ready", 0.65);
-      addText(W/2, 188, `삐용! 탈락 위험 ${deficit}점 차이`, "#ff4666", 30, 0.75);
-      for (let i=0; i<18; i++) {
-        particles.push({
-          x: W/2 + (Math.random()-.5)*620,
-          y: 145 + Math.random()*85,
-          vx: (Math.random()-.5)*150,
-          vy: -80 - Math.random()*120,
-          life: .45 + Math.random()*.35,
-          color: Math.random() < .5 ? "#ff3055" : "#fff0a8",
-          size: 5 + Math.random()*6
-        });
-      }
-    }
-    if (deficit >= 1000) {
-      addText(W/2, 230, "1000점 차이! 사용자 경쟁전 탈락", "#ffb0b0", 34, 1.1);
-      finishStage(false, "competition_eliminated");
-      return true;
-    }
-    return false;
-  }
-
-  function commitCompetitionRecord(clear=false) {
-    if (competitionSaved || !finalStats.length) return;
-    competitionSaved = true;
-    const entry = {
-      at: new Date().toISOString(),
-      userId: currentUserId || "guest",
-      nickname: currentNickname() || getLocalName() || "게스트",
-      character: chars[selectedChar].name,
-      clear: !!clear,
-      reachedStage: Math.max(...finalStats.map(r => r.stage || 1)),
-      totalScore: totalRunScore(finalStats),
-      bestCpm: bestRunCpm(finalStats),
-      bestCombo: bestRunCombo(finalStats),
-      stars: finalStats.reduce((s, r) => s + (r.star || 0), 0),
-      donggops: finalStats.reduce((s, r) => s + (r.donggop || 0), 0),
-      fevers: finalStats.reduce((s, r) => s + (r.fever || 0), 0)
-    };
-    const list = loadLeaderboard();
-    list.push(entry);
-    list.sort((a,b) =>
-      (b.totalScore - a.totalScore) ||
-      (b.reachedStage - a.reachedStage) ||
-      (b.bestCpm - a.bestCpm) ||
-      (b.bestCombo - a.bestCombo)
-    );
-    saveLeaderboard(list);
-    if (remoteApiEnabled() && currentGoogleIdToken) {
-      remotePost("saveScore", { score: entry }).then((data) => {
-        if (data && Array.isArray(data.leaderboard)) saveLeaderboard(data.leaderboard);
-      });
-    }
-    if (currentUserId && accounts[currentUserId]) {
-      const acc = accounts[currentUserId];
-      if (!Array.isArray(acc.records)) acc.records = [];
-      acc.records.unshift({ at: entry.at, kind: "competition", mode: "competition", stage: entry.reachedStage, win: entry.clear, score: entry.totalScore, maxCpm: entry.bestCpm, combo: entry.bestCombo });
-      if (acc.records.length > 100) acc.records.length = 100;
-      if (!acc.totals) acc.totals = { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 };
-      acc.totals.plays = (acc.totals.plays || 0) + 1;
-      if (entry.clear) acc.totals.wins = (acc.totals.wins || 0) + 1;
-      acc.totals.bestScore = Math.max(acc.totals.bestScore || 0, entry.totalScore);
-      acc.totals.bestCpm = Math.max(acc.totals.bestCpm || 0, entry.bestCpm);
-      acc.totals.bestCombo = Math.max(acc.totals.bestCombo || 0, entry.bestCombo);
-      acc.totals.bestStage = Math.max(acc.totals.bestStage || 0, entry.reachedStage);
-      saveAccounts();
-    }
   }
 
   function nowSec() { return performance.now() / 1000; }
@@ -929,8 +377,8 @@
     else if (state === "title") playBgm("titleBgm");
     else if (state === "select" || state === "mode" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
-    else if (state === "stageCountdown") playBgm(`stage${Math.min(stageIndex + 1, 5)}`);
-    else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${Math.min(stageIndex + 1, 5)}`);
+    else if (state === "stageCountdown") playBgm(`stage${stageIndex + 1}`);
+    else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${stageIndex + 1}`);
     else if (state === "ending" || state === "final") playBgm("endingBgm");
     else stopBgm();
   }
@@ -1307,104 +755,6 @@
     return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   }
 
-
-  function loginButtonRect() {
-    return { id: "loginMain", x: 1018, y: 28, w: 205, h: 46, color: currentUserId ? "#bfffe0" : "#ffd6ff", label: currentUserId ? `${currentNickname()} 로그인` : "Google 로그인" };
-  }
-
-  function loginDropdownRect() {
-    const r = loginButtonRect();
-    return { id: "loginDrop", x: r.x, y: r.y + r.h + 6, w: r.w, h: currentUserId ? 144 : 62, color: r.color, label: "계정 메뉴" };
-  }
-
-  function loginWidgetOpen(p=mouse) {
-    if (state !== "title") return false;
-    return inRect(p, loginButtonRect()) || inRect(p, loginDropdownRect());
-  }
-
-  function accountActionRects() {
-    const r = loginDropdownRect();
-    if (currentUserId) {
-      return [
-        { id:"records", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"내 기록" },
-        { id:"logout", x:r.x+14, y:r.y+56, w:r.w-28, h:34, color:"#ffd6ff", label:"로그아웃" },
-        { id:"accountInfo", x:r.x+14, y:r.y+98, w:r.w-28, h:32, color:"#bfffe0", label: currentUserId },
-      ];
-    }
-    return [
-      { id:"googleLogin", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"Google 로그인" },
-    ];
-  }
-
-  function drawAccountWidget() {
-    if (state !== "title") return;
-    accountButtons = [];
-    const r = loginButtonRect();
-    const open = loginWidgetOpen();
-    const hovered = inRect(mouse, r);
-    ctx.save();
-    ctx.fillStyle = hovered || open ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.46)";
-    ctx.strokeStyle = hovered || open ? r.color : "rgba(255,255,255,.62)";
-    ctx.lineWidth = hovered || open ? 2.8 : 1.6;
-    ctx.shadowColor = hovered || open ? r.color : "transparent";
-    ctx.shadowBlur = hovered || open ? 18 : 0;
-    roundRect(r.x, r.y, r.w, r.h, 16);
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
-    drawText(currentUserId ? `👤 ${currentNickname()}` : "Google 로그인", r.x + r.w/2, r.y + r.h/2, currentUserId ? 17 : 18, r.color, "center", true);
-
-    if (open) {
-      const d = loginDropdownRect();
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,.70)";
-      ctx.strokeStyle = "rgba(255,255,255,.70)";
-      ctx.lineWidth = 2;
-      ctx.shadowColor = r.color;
-      ctx.shadowBlur = 18;
-      roundRect(d.x, d.y, d.w, d.h, 18);
-      ctx.fill(); ctx.stroke();
-      ctx.restore();
-      for (const b of accountActionRects()) {
-        accountButtons.push(b);
-        const bh = inRect(mouse, b);
-        ctx.save();
-        ctx.fillStyle = bh ? "rgba(255,255,255,.18)" : "rgba(20,18,48,.82)";
-        ctx.strokeStyle = bh ? b.color : "rgba(255,255,255,.55)";
-        ctx.lineWidth = bh ? 2.6 : 1.5;
-        ctx.shadowColor = bh ? b.color : "transparent";
-        ctx.shadowBlur = bh ? 14 : 0;
-        roundRect(b.x,b.y,b.w,b.h,12);
-        ctx.fill(); ctx.stroke();
-        ctx.restore();
-        drawText(b.label, b.x + b.w/2, b.y + b.h/2, b.id === "accountInfo" ? 13 : 16, b.color, "center", true);
-      }
-    }
-
-    if (loginNoticeTimer > 0 && loginNotice) {
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,.64)";
-      ctx.strokeStyle = "rgba(255,240,168,.82)";
-      ctx.lineWidth = 2;
-      roundRect(350, 84, 580, 40, 16);
-      ctx.fill(); ctx.stroke();
-      ctx.restore();
-      drawText(loginNotice, W/2, 104, 17, "#fff0a8", "center", true);
-    }
-  }
-
-  function handleAccountClick(p) {
-    if (state !== "title") return false;
-    if (!loginWidgetOpen(p)) return false;
-    const action = accountActionRects().find(b => inRect(p, b));
-    if (!action) return true;
-    if (action.id === "googleLogin") showGoogleLoginPanel();
-    else if (action.id === "create") promptCreateAccount();
-    else if (action.id === "login") promptLoginAccount();
-    else if (action.id === "logout") logoutAccount();
-    else if (action.id === "records") { recordsScroll = 0; setState("records"); }
-    return true;
-  }
-
   function titleStartRect() {
     return { id: "titleStart", x: 360, y: 560, w: 560, h: 132, color: "#fff0a8", label: "게임 시작" };
   }
@@ -1413,7 +763,6 @@
     return [
       { id: "single", x: 315, y: 337, w: 650, h: 52, color: "#8bdfff", label: "싱글 플레이 AI 대전" },
       { id: "online", x: 360, y: 395, w: 560, h: 54, color: "#ffd6ff", label: "ONLINE 1:1 대전" },
-      { id: "competition", x: 340, y: 454, w: 600, h: 54, color: "#fff0a8", label: "사용자 경쟁전" },
     ];
   }
 
@@ -1907,7 +1256,6 @@
     if (state === "result") return inRect(mouse, resultNextRect()) ? resultNextRect() : null;
     if (state === "ending") return inRect(mouse, endingNextRect()) ? endingNextRect() : null;
     if (state === "final") return inRect(mouse, finalNextRect()) ? finalNextRect() : null;
-    if (state === "records") return inRect(mouse, recordsBackRect()) ? recordsBackRect() : null;
     if (state === "onlineLobby") {
       const b = onlineLobbyButtons.find(v => !v.disabled && inRect(mouse, v));
       if (b) return { ...b, color: "#fff0a8" };
@@ -2043,7 +1391,7 @@
   }
 
   function getLocalName() {
-    return sanitizePlayerName(localPlayerName || currentNickname() || chars[selectedChar].name);
+    return sanitizePlayerName(localPlayerName || chars[selectedChar].name);
   }
 
   function ensureOnlinePlayers() {
@@ -2414,7 +1762,6 @@
       return;
     }
     if (state === "title") {
-      if (handleAccountClick(p)) return;
       if (inRect(p, titleStartRect())) { setState("select"); playSfx("select"); return; }
       const h = getTitleHotspot(p);
       if (h) { openTitleLink(h); return; }
@@ -2428,14 +1775,12 @@
       if (opt) {
         if (opt.id === "single") startSingle();
         else if (opt.id === "online") openConnectionPanel();
-        else if (opt.id === "competition") startCompetition();
         return;
       }
     }
     if (state === "result" && inRect(p, resultNextRect())) { proceedResult(); return; }
     if (state === "ending" && inRect(p, endingNextRect())) { proceedEnding(); return; }
     if (state === "final" && inRect(p, finalNextRect())) { proceedFinal(); return; }
-    if (state === "records" && inRect(p, recordsBackRect())) { setState("title"); return; }
     if (state === "onlineLobby") {
       if (handleOnlineLobbyClick(p.x, p.y)) return;
     }
@@ -2525,25 +1870,8 @@
   function startSingle() {
     gameMode = "single";
     stage5FailCount = 0;
-    competitionSaved = false;
     closePeer();
-    local = defaultPlayer(selectedChar, "left", getLocalName());
-    remote = defaultPlayer(1 - selectedChar, "right", "AI " + chars[1 - selectedChar].name);
-    finalStats = [];
-    startStage(0);
-  }
-
-  function startCompetition() {
-    if (!currentUserId) {
-      setLoginNotice("사용자 경쟁전은 로그인 후 이용 가능");
-      return;
-    }
-    gameMode = "competition";
-    stage5FailCount = 0;
-    competitionSaved = false;
-    leaderboardScroll = 0;
-    closePeer();
-    local = defaultPlayer(selectedChar, "left", getLocalName());
+    local = defaultPlayer(selectedChar, "left");
     remote = defaultPlayer(1 - selectedChar, "right", "AI " + chars[1 - selectedChar].name);
     finalStats = [];
     startStage(0);
@@ -2565,10 +1893,9 @@
     aiAcc = 0;
     aiSurge = 0;
     aiCatchupActive = false;
-    competitionLastWarnAt = 0;
     result = null;
 
-    if (gameMode === "single" || gameMode === "competition") {
+    if (gameMode === "single") {
       stageCountdownStart = nowSec();
       stageCountdownEnd = stageCountdownStart + 3.6;
       setState("stageCountdown");
@@ -2586,10 +1913,9 @@
     if (gameMode === "online" && broadcast) sendMsg({ type: "stage_start", stage: stageIndex });
   }
 
-  function finishStage(forcedWin = null, reason = "") {
-    const stageWin = forcedWin === null ? local.score >= remote.score : !!forcedWin;
+  function finishStage() {
     result = {
-      win: stageWin,
+      win: local.score >= remote.score,
       localScore: local.score,
       remoteScore: remote.score,
       maxCpm: local.maxCpm,
@@ -2600,10 +1926,8 @@
       fever: local.feverCount,
       stage: gameMode === "online" ? 1 : stageIndex + 1,
       online: gameMode === "online",
-      reason,
     };
     if (gameMode !== "online") finalStats.push(result);
-    if (gameMode === "single" || gameMode === "competition") saveUserStageRecord(result, gameMode === "competition" ? "competition_stage" : "single_stage");
     playSfx(result.win ? "resultWin" : "resultLose", 1.0);
     setState("result");
   }
@@ -2614,9 +1938,7 @@
   }
 
   function updateAI(dt) {
-    // AI 대전과 사용자 경쟁전은 둘 다 로컬 AI가 상대입니다.
-    // v31에서는 single에서만 AI가 갱신되어 경쟁전 AI가 0 CPM으로 멈추는 문제가 있었습니다.
-    if (!((gameMode === "single" || gameMode === "competition") && state === "playing")) return;
+    if (gameMode !== "single" || state !== "playing") return;
     const stage = STAGES[stageIndex];
     if (aiSurge > 0) aiSurge -= dt;
     else if (Math.random() < dt * (0.05 + stageIndex * 0.018)) aiSurge = 4 + Math.random() * 4;
@@ -2685,14 +2007,13 @@
       else player.donggopSustain = 0;
       if (player.donggopSustain >= DONGGOP_SUSTAIN) {
         player.donggopSustain = 0;
-        const maxAutoItems = maxAutoItemsForCurrentStage();
-        if (player.donggopItems < maxAutoItems) {
+        if (player.donggopItems < 5) {
           player.donggopItems++;
           player.donggopEarned++;
-          addText(330, 305, `${AUTO_SKILL_NAME} 획득! ${keyLabel(keyConfig.auto)}번`, "#bfe8ff", 28, 1.0);
+          addText(330, 305, `${AUTO_SKILL_NAME} 획득! 5번`, "#bfe8ff", 28, 1.0);
           playSfx("ready");
         } else {
-          addText(330, 305, `${AUTO_SKILL_NAME} 최대 ${maxAutoItems}개`, "#ffd08a", 26, .9);
+          addText(330, 305, `${AUTO_SKILL_NAME} 최대 5개`, "#ffd08a", 26, .9);
         }
       }
 
@@ -2935,17 +2256,11 @@
       stage5FailCount = 0;
       setState("title");
     } else if (gameMode === "single") {
-      if (result.win && stageIndex < 4) startStage(stageIndex + 1);
+      if (result.win && stageIndex < STAGES.length - 1) startStage(stageIndex + 1);
       else if (!result.win) startStage(stageIndex);
       else {
         endingTimer = 5;
         setState("ending");
-      }
-    } else if (gameMode === "competition") {
-      if (result.win && stageIndex < 9) startStage(stageIndex + 1);
-      else {
-        commitCompetitionRecord(result.win && stageIndex >= 9);
-        setState("final");
       }
     } else {
       onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
@@ -3032,7 +2347,6 @@
     if (state === "mode") {
       if (e.key === "Enter" || e.key === " ") startSingle();
       if (k === "o") openConnectionPanel();
-      if (k === "c") startCompetition();
       return;
     }
     if (state === "playing") {
@@ -3070,24 +2384,7 @@
       proceedFinal();
       return;
     }
-    if (state === "records" && (e.key === "Escape" || e.key === "Enter")) {
-      setState("title");
-      return;
-    }
   }
-
-  canvas.addEventListener("wheel", (e) => {
-    if (state === "final" && gameMode === "competition") {
-      const board = loadLeaderboard();
-      leaderboardScroll = Math.max(0, Math.min(Math.max(0, board.length - 10), leaderboardScroll + (e.deltaY > 0 ? 1 : -1)));
-      e.preventDefault();
-    } else if (state === "records") {
-      const acc = currentAccount();
-      const len = acc && Array.isArray(acc.records) ? acc.records.length : 0;
-      recordsScroll = Math.max(0, Math.min(Math.max(0, len - 7), recordsScroll + (e.deltaY > 0 ? 1 : -1)));
-      e.preventDefault();
-    }
-  }, { passive: false });
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
@@ -3106,7 +2403,6 @@
   function update(dt) {
     if (introFlash > 0) introFlash = Math.max(0, introFlash - dt * 1.9);
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
-    if (loginNoticeTimer > 0) loginNoticeTimer = Math.max(0, loginNoticeTimer - dt);
     if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
       startOnlineMatch();
       return;
@@ -3137,9 +2433,8 @@
     if (state === "playing") {
       updatePlayerItems(local, dt, true);
       updatePlayerItems(remote, dt, false);
-      if (gameMode === "single" || gameMode === "competition") updateAI(dt);
+      if (gameMode === "single") updateAI(dt);
       else sendState(false);
-      if (maybeHandleCompetitionElimination()) return;
       if (timeLeft() <= 0) finishStage();
     }
     if (state === "ending" && endingTimer > 0) {
@@ -3341,7 +2636,7 @@
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(W/2,190); ctx.lineTo(W/2,520); ctx.stroke();
     }
-    drawText(`${STAGES[stageIndex].name} / ${gameMode === "competition" ? "사용자 경쟁전" : "AI 대전"}`, W/2, 42, 34, "#fff");
+    drawText(`${STAGES[stageIndex].name} / AI 대전`, W/2, 42, 34, "#fff");
     drawText(`난이도 ${STAGES[stageIndex].rank}`, W/2, 88, 24, "#fff0a8");
 
     const elapsed = Math.max(0, nowSec() - stageCountdownStart);
@@ -3372,46 +2667,18 @@
     drawParticles();
   }
 
-  function drawCompetitionDangerVfx() {
-    const deficit = competitionDeficit();
-    if (deficit < 500) return;
-    const t = nowSec();
-    const blink = Math.sin(t * 12) > 0;
-    ctx.save();
-    ctx.globalAlpha = blink ? 0.24 : 0.10;
-    ctx.fillStyle = "#ff153f";
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = blink ? 9 : 5;
-    ctx.strokeStyle = blink ? "rgba(255,30,70,.96)" : "rgba(255,210,90,.78)";
-    ctx.shadowColor = "#ff2048";
-    ctx.shadowBlur = blink ? 28 : 12;
-    roundRect(22, 24, W-44, H-48, 32);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(W/2, 160);
-    const pulse = 1 + Math.sin(t * 14) * 0.055;
-    ctx.scale(pulse, pulse);
-    drawText("⚠ 삐용 삐용! 탈락 위험 ⚠", 0, 0, 34, blink ? "#ff405c" : "#fff0a8", "center", true);
-    drawText(`AI와 ${deficit}점 차이 · 1000점 차이면 탈락`, 0, 38, 21, "#ffffff", "center", true);
-    ctx.restore();
-  }
-
   function drawHUD() {
     const left = timeLeft();
     const mm = Math.floor(left/60).toString().padStart(2,"0");
     const ss = Math.floor(left%60).toString().padStart(2,"0");
-    drawText(gameMode === "online" ? "ONLINE 1:1 대전" : `${STAGES[stageIndex].name} / ${gameMode === "competition" ? "사용자 경쟁전" : "AI 대전"}`, W/2, 28, 28, "#fff");
+    drawText(gameMode === "single" ? `${STAGES[stageIndex].name} / AI 대전` : "ONLINE 1:1 대전", W/2, 28, 28, "#fff");
     drawText(`${mm}:${ss}`, W/2, 76, 42, "#fff0a8");
-    drawText(gameMode === "online" ? `${getLocalName()} vs ${remote ? remote.name : "상대"}` : `난이도 ${STAGES[stageIndex].rank}`, W/2, 114, 22, "#fff");
+    drawText(gameMode === "single" ? `난이도 ${STAGES[stageIndex].rank}` : `${getLocalName()} vs ${remote ? remote.name : "상대"}`, W/2, 114, 22, "#fff");
 
     drawPanel(220, 590, 840, 128);
     const tHud = nowSec();
     const starActive = !!local.fUnlocked;
-    const maxAutoItems = maxAutoItemsForCurrentStage();
-    const autoFull = local.donggopItems >= maxAutoItems;
+    const autoFull = local.donggopItems >= 5;
     const bStatus = starActive
       ? `${STAR_SKILL_NAME}(${keyLabel(keyConfig.star)}키) ${local.fTimer.toFixed(1)}s`
       : local.fCooldown > 0
@@ -3439,7 +2706,7 @@
     }
     const autoPalette = ["#fff0a8", "#8bdfff", "#ffffff", "#ffd6ff"];
     const autoColor = autoFull ? autoPalette[Math.floor(tHud * 6) % autoPalette.length] : (local.donggopItems > 0 ? "#ffe5a8" : "#ffffff");
-    drawText(`${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} x${local.donggopItems}/${maxAutoItems}`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
+    drawText(`${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} x${local.donggopItems}/5`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
     if (autoFull) {
       drawMiniHudSparkles(autoBox.x, autoBox.y, autoBox.w, autoBox.h, tHud + 0.61, "auto");
       drawText("READY!", autoBox.x + autoBox.w - 40, autoBox.y - 6, 13, "#bfffe0");
@@ -3683,121 +2950,7 @@
     ctx.restore();
   }
 
-
-  function recordsBackRect() {
-    return { id: "recordsBack", x: 485, y: 645, w: 310, h: 52, color: "#bfe8ff", label: "뒤로" };
-  }
-
-  function drawRecordsPage() {
-    drawImageCover(assets.bg, 0,0,W,H);
-    ctx.fillStyle = "rgba(0,0,0,.72)";
-    ctx.fillRect(0,0,W,H);
-    drawPanel(85, 44, 1110, 636);
-    const acc = currentAccount();
-    drawText("내 동꼽즈 기록", W/2, 88, 42, "#fff0a8");
-    if (!acc) {
-      drawText("로그인 후 사용자별 기록을 볼 수 있습니다.", W/2, 250, 28, "#fff");
-    } else {
-      const totals = acc.totals || {};
-      drawText(`닉네임: ${acc.nickname}   ID: ${acc.id}`, W/2, 132, 22, "#bfe8ff");
-      drawPanel(120, 160, 1040, 110);
-      const items = [
-        ["플레이", totals.plays || 0],
-        ["승리", totals.wins || 0],
-        ["최고점수", totals.bestScore || 0],
-        ["최고CPM", totals.bestCpm || 0],
-        ["최대콤보", totals.bestCombo || 0],
-        ["최고스테이지", totals.bestStage || 0],
-      ];
-      items.forEach((it, idx) => {
-        const x = 190 + idx * 170;
-        drawText(it[0], x, 190, 17, "#fff", "center", true);
-        drawText(String(it[1]), x, 230, 25, "#fff0a8", "center", true);
-      });
-
-      drawText(`저장된 키 설정: ${keyLabel(keyConfig.hit)} 동꼽 / ${keyLabel(keyConfig.star)} 별풍선 / ${keyLabel(keyConfig.auto)} 자동사냥`, W/2, 300, 20, "#bfffe0");
-      drawPanel(120, 326, 1040, 260);
-      drawText("최근 게임 기록", 170, 354, 20, "#fff0a8", "left", true);
-      const recs = Array.isArray(acc.records) ? acc.records : [];
-      const start = Math.max(0, Math.min(recordsScroll, Math.max(0, recs.length - 7)));
-      drawText("날짜", 205, 390, 16, "#bfe8ff");
-      drawText("모드", 365, 390, 16, "#bfe8ff");
-      drawText("스테이지", 515, 390, 16, "#bfe8ff");
-      drawText("결과", 650, 390, 16, "#bfe8ff");
-      drawText("점수", 785, 390, 16, "#bfe8ff");
-      drawText("CPM", 920, 390, 16, "#bfe8ff");
-      drawText("콤보", 1045, 390, 16, "#bfe8ff");
-      let y = 425;
-      for (const r of recs.slice(start, start + 7)) {
-        const date = (r.at || "").slice(5, 16).replace("T", " ");
-        const modeLabel = r.mode === "competition" ? "경쟁전" : (r.mode === "single" ? "AI" : "기록");
-        drawText(date, 205, y, 15, "#fff", "center", true);
-        drawText(modeLabel, 365, y, 15, "#fff", "center", true);
-        drawText(String(r.stage || "-"), 515, y, 15, "#fff0a8", "center", true);
-        drawText(r.win ? "승리" : "패배", 650, y, 15, r.win ? "#bfffe0" : "#ffb0b0", "center", true);
-        drawText(String(r.score || 0), 785, y, 15, "#fff0a8", "center", true);
-        drawText(String(r.maxCpm || 0), 920, y, 15, "#fff0a8", "center", true);
-        drawText(String(r.combo || 0), 1045, y, 15, "#fff0a8", "center", true);
-        y += 30;
-      }
-      if (recs.length > 7) drawText("마우스 휠로 스크롤", 1040, 354, 15, "#ddd", "center", true);
-    }
-    const br = recordsBackRect();
-    if (inRect(mouse, br)) drawHoverSelectBox(br, 0.18);
-    drawText("ESC / CLICK : 뒤로", W/2, br.y + br.h/2, 22, "#bfe8ff", "center", true);
-  }
-
-  function drawCompetitionFinal() {
-    drawImageCover(assets.bg, 0,0,W,H);
-    ctx.fillStyle = "rgba(0,0,0,.74)";
-    ctx.fillRect(0,0,W,H);
-    drawPanel(72, 42, 1136, 642);
-    const board = loadLeaderboard();
-    const best = board[0];
-    drawText("사용자 경쟁전 최종 결과", W/2, 82, 38, "#fff0a8");
-    drawText(`내 기록: ${getLocalName()} / 총점 ${totalRunScore(finalStats)} / 스테이지 ${Math.max(0, ...finalStats.map(r => r.stage || 0))} / 최고CPM ${bestRunCpm(finalStats)} / 최대콤보 ${bestRunCombo(finalStats)}`, W/2, 125, 19, "#bfe8ff");
-    if (best) drawText(`현재 1위: ${best.nickname}  ${best.totalScore}점  ${best.reachedStage}스테이지`, W/2, 156, 20, "#ffd6ff");
-
-    drawPanel(110, 182, 1060, 392);
-    drawText("순위", 155, 214, 17, "#bfe8ff");
-    drawText("닉네임", 300, 214, 17, "#bfe8ff");
-    drawText("캐릭터", 455, 214, 17, "#bfe8ff");
-    drawText("스테이지", 575, 214, 17, "#bfe8ff");
-    drawText("총점", 710, 214, 17, "#bfe8ff");
-    drawText("최고CPM", 855, 214, 17, "#bfe8ff");
-    drawText("최대콤보", 1005, 214, 17, "#bfe8ff");
-    const maxStart = Math.max(0, board.length - 10);
-    leaderboardScroll = Math.max(0, Math.min(leaderboardScroll, maxStart));
-    let y = 252;
-    for (let i = leaderboardScroll; i < Math.min(board.length, leaderboardScroll + 10); i++) {
-      const r = board[i];
-      const me = currentUserId && r.userId === currentUserId && r.totalScore === totalRunScore(finalStats);
-      const color = i === 0 ? "#fff0a8" : (me ? "#bfffe0" : "#fff");
-      if (me) {
-        ctx.save();
-        ctx.fillStyle = "rgba(191,255,224,.12)";
-        roundRect(122, y - 16, 1025, 28, 12);
-        ctx.fill();
-        ctx.restore();
-      }
-      drawText(String(i + 1), 155, y, 17, color);
-      drawText(String(r.nickname || "-"), 300, y, 17, color);
-      drawText(String(r.character || "-"), 455, y, 17, color);
-      drawText(`${r.reachedStage || 0}F`, 575, y, 17, color);
-      drawText(String(r.totalScore || 0), 710, y, 17, color);
-      drawText(String(r.bestCpm || 0), 855, y, 17, color);
-      drawText(String(r.bestCombo || 0), 1005, y, 17, color);
-      y += 32;
-    }
-    if (!board.length) drawText("아직 경쟁전 기록이 없습니다.", W/2, 360, 26, "#fff");
-    if (board.length > 10) drawText("마우스 휠로 1위~100위 스크롤", W/2, 594, 18, "#fff0a8");
-    const fr = finalNextRect();
-    if (inRect(mouse, fr)) drawHoverSelectBox(fr, 0.18);
-    drawText("ENTER : 초기화면으로", W/2, 616, 25, "#bfe8ff");
-  }
-
   function drawFinal() {
-    if (gameMode === "competition") { drawCompetitionFinal(); return; }
     drawImageCover(assets.bg, 0,0,W,H);
     ctx.fillStyle = "rgba(0,0,0,.72)";
     ctx.fillRect(0,0,W,H);
@@ -3859,15 +3012,13 @@
       drawText(`현재 선택: ${chars[currentSelectVisualChar()].name}`, W/2, 670, 30, "#fff");
     } else if (state === "mode") {
       drawImageCover(assets.bg,0,0,W,H);
-      drawPanel(205,145,870,455);
-      drawText("동꼽즈 게임 모드", W/2, 205, 48, "#fff");
-      drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 270, 31, "#fff0a8");
+      drawPanel(220,155,840,410);
+      drawText("동꼽즈 게임 모드", W/2, 220, 48, "#fff");
+      drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 285, 32, "#fff0a8");
       for (const r of modeOptionRects()) if (inRect(mouse, r)) { drawHoverSelectBox(r, 0.18); drawSmallVfxAroundRect(r, r.color); }
-      drawText("ENTER / SPACE : 싱글 플레이 AI 대전", W/2, 370, 31, "#bfe8ff");
-      drawText("O : ONLINE 1:1 대전", W/2, 425, 31, "#ffd6ff");
-      drawText("C : 사용자 경쟁전", W/2, 482, 31, "#fff0a8");
-      drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 550, 20, "#fff0a8");
-      if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 588, 18, "#ffb0b0");
+      drawText("ENTER / SPACE : 싱글 플레이 AI 대전", W/2, 370, 32, "#bfe8ff");
+      drawText("O : ONLINE 1:1 대전", W/2, 425, 32, "#ffd6ff");
+      drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 500, 21, "#fff0a8");
     } else if (state === "connected") {
       drawImageCover(assets.bg,0,0,W,H);
       drawPanel(270,220,740,260);
@@ -3888,7 +3039,6 @@
       ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(W/2,190); ctx.lineTo(W/2,520); ctx.stroke();
       drawParticles();
       drawHUD();
-      drawCompetitionDangerVfx();
     } else if (state === "result") {
       drawImageCover(assets.bg,0,0,W,H);
       ctx.fillStyle = "rgba(0,0,0,.70)"; ctx.fillRect(0,0,W,H);
@@ -3910,22 +3060,17 @@
       }
 
       drawText(result.win ? "승리!" : "패배", W/2, 112, 52, result.win ? "#fff0a8" : "#ffb0b0");
-      if (result.reason === "competition_eliminated") {
-        drawText("1000점 차이로 사용자 경쟁전 탈락!", W/2, 165, 25, "#ffb0b0");
-      }
       drawPanel(250, 335, 780, 245);
       drawText(`${local.name} ${result.localScore} : ${result.remoteScore} ${remote.name}`, W/2, 365, 30);
       drawText(`최대 연타 ${result.maxCpm} CPM / 키보드 ${result.maxManualCpm} CPM`, W/2, 417, 25);
       drawText(`별풍선 ${result.star}회 / 동꼽 ${result.donggop}개 / 피버 ${result.fever}회`, W/2, 467, 25);
       drawText(`최대 콤보 ${result.combo}`, W/2, 517, 25);
 
-      let next = gameMode === "competition"
-        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "경쟁전 랭킹")
-        : (gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비");
+      let next = gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비";
       if (result.autoReturnTitle) {
         drawText(`5스테이지 3회 실패 - ${Math.ceil(result.returnTimer || 3)}초 후 초기화면`, W/2, 585, 23, "#ffb3c7");
         next = "초기화면";
-      } else if (gameMode === "single" && stageIndex === 4 && !result.win) {
+      } else if (stageIndex === 4 && !result.win) {
         drawText(`5스테이지 실패 ${result.stage5FailCount || stage5FailCount}/3`, W/2, 585, 23, "#ffb3c7");
       }
       const rr = resultNextRect();
@@ -3942,10 +3087,7 @@
       drawText("ENTER / SPACE : 최종 결과", W/2, 660, 28, "#fff");
     } else if (state === "final") {
       drawFinal();
-    } else if (state === "records") {
-      drawRecordsPage();
     }
-    drawAccountWidget();
     drawFloatingBgmVolumeControl();
     drawGlobalFullscreenButton();
     drawMenuIcon();
@@ -3960,8 +3102,6 @@
     render();
   }
 
-  loadAccounts();
-  if (currentUserId && accounts[currentUserId]) localPlayerName = sanitizePlayerName(accounts[currentUserId].nickname || currentUserId);
   loadSettings();
   applyVolumes();
 

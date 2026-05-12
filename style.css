@@ -32,7 +32,7 @@ canvas {
   z-index: 10;
 }
 
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 .signalBox {
   width: min(960px, 92vw);
@@ -105,3 +105,59 @@ textarea {
 .copy { background: linear-gradient(180deg, #ff7fc9, #7a1767); }
 .ok { color: #fff6a8; font-weight: 800; }
 .warn { color: #ffcc9b; font-weight: 800; }
+
+
+.google-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  pointer-events: auto;
+  place-items: center;
+  background: rgba(0,0,0,.70);
+}
+.google-login-card {
+  position: relative;
+  z-index: 2147483001;
+  pointer-events: auto;
+  width: min(460px, 90vw);
+  background: rgba(10,10,24,.96);
+  border: 2px solid rgba(255,255,255,.72);
+  border-radius: 24px;
+  box-shadow: 0 0 36px rgba(140,210,255,.45), 0 0 36px rgba(255,130,225,.24);
+  padding: 26px;
+  text-align: center;
+}
+.google-login-card h3 {
+  margin: 0 0 10px;
+  font-size: 28px;
+  color: #fff0a8;
+}
+.google-login-card p {
+  margin: 0 0 18px;
+  color: #dce7ff;
+  font-size: 15px;
+}
+.google-login-status {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  background: rgba(255,210,120,.12);
+  border: 1px solid rgba(255,230,160,.45);
+  color: #fff0a8;
+}
+.google-login-status.ok {
+  background: rgba(130,255,190,.12);
+  border-color: rgba(130,255,190,.45);
+  color: #cffff0;
+}
+.google-login-close {
+  position: relative;
+  z-index: 2147483002;
+  pointer-events: auto;
+  margin-top: 18px;
+  width: 100%;
+  background: linear-gradient(180deg, #44445f, #1a1a2c);
+}
