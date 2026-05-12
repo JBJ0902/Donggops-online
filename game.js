@@ -1463,26 +1463,28 @@
   }
 
   function modeOptionRects() {
+    // v39: 이미지가 작게 깨져 보이지 않도록 카드와 이미지 영역을 확대하고,
+    // 텍스트는 우측 정보 영역 안에서만 배치합니다.
     return [
       {
-        id: "single", x: 88, y: 144, w: 500, h: 200, color: "#65b5ff", image: "modeSingle",
+        id: "single", x: 88, y: 148, w: 500, h: 226, color: "#65b5ff", image: "modeSingle",
         label: "싱글 플레이 AI 대전", shortLabel: "AI 대전", key: "ENTER / SPACE",
-        desc1: "기존 1~5 스테이지", desc2: "혼자 즐기는 기본 모드"
+        desc1: "1~5 스테이지", desc2: "혼자 즐기는 기본 모드"
       },
       {
-        id: "online", x: 608, y: 144, w: 500, h: 200, color: "#ff7ad6", image: "modeOnline",
+        id: "online", x: 630, y: 148, w: 500, h: 226, color: "#ff7ad6", image: "modeOnline",
         label: "ONLINE 1:1 대전", shortLabel: "온라인 매치", key: "O",
-        desc1: "WebRTC 1:1 직접 대전", desc2: "로비 · 채팅 · READY"
+        desc1: "1:1 로비 대전", desc2: "채팅 · READY"
       },
       {
-        id: "competition", x: 88, y: 382, w: 500, h: 200, color: "#fff0a8", image: "modeCompetition",
+        id: "competition", x: 88, y: 396, w: 500, h: 226, color: "#fff0a8", image: "modeCompetition",
         label: "사용자 경쟁전", shortLabel: "경쟁전", key: "C",
-        desc1: "1~10 스테이지 도전", desc2: "랭킹 기록 저장"
+        desc1: "1~10 스테이지", desc2: "랭킹 기록 저장"
       },
       {
-        id: "competitionRank", x: 608, y: 382, w: 500, h: 200, color: "#bfffe0", image: "modeRank",
+        id: "competitionRank", x: 630, y: 396, w: 500, h: 226, color: "#bfffe0", image: "modeRank",
         label: "사용자 온라인 경쟁전 순위 보기", shortLabel: "순위 보기", key: "R",
-        desc1: "외부 경쟁전 순위", desc2: "1위부터 100위까지 확인"
+        desc1: "외부 경쟁전 순위", desc2: "1위~100위 확인"
       },
     ];
   }
@@ -1856,67 +1858,90 @@
   function drawModeCard(card) {
     const hovered = inRect(mouse, card);
     const t = nowSec();
-    const dy = hovered ? -8 : 0;
-    const x = card.x, y = card.y + dy, w = card.w, h = card.h;
-    const glow = hovered ? 28 + Math.sin(t * 8) * 7 : 10;
+    const pop = hovered ? 1.018 + Math.sin(t * 7) * 0.004 : 1;
+    const baseDy = hovered ? -6 : 0;
+    const cx = card.x + card.w / 2;
+    const cy = card.y + card.h / 2 + baseDy;
+    const x = cx - (card.w * pop) / 2;
+    const y = cy - (card.h * pop) / 2;
+    const w = card.w * pop;
+    const h = card.h * pop;
+    const glow = hovered ? 30 + Math.sin(t * 8) * 7 : 12;
 
+    // 카드 배경: 큰 이미지 영역 + 오른쪽 정보 패널.
     ctx.save();
     ctx.shadowColor = card.color;
     ctx.shadowBlur = glow;
-    ctx.fillStyle = hovered ? "rgba(10,10,32,.78)" : "rgba(0,0,0,.58)";
-    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.62)";
-    ctx.lineWidth = hovered ? 3.5 : 2;
-    roundRect(x, y, w, h, 24);
+    ctx.fillStyle = hovered ? "rgba(10,10,32,.82)" : "rgba(0,0,0,.64)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.64)";
+    ctx.lineWidth = hovered ? 3.2 : 2;
+    roundRect(x, y, w, h, 25);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
 
-    const imgBox = { x: x + 16, y: y + 17, w: 220, h: 165 };
+    const pad = 12 * pop;
+    const imgBox = { x: x + pad, y: y + pad, w: 308 * pop, h: h - pad * 2 };
+    const infoBox = { x: imgBox.x + imgBox.w + 14 * pop, y: y + 20 * pop, w: w - imgBox.w - pad * 2 - 14 * pop, h: h - 40 * pop };
+
     ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,.64)";
-    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.48)";
+    ctx.shadowColor = hovered ? card.color : "rgba(0,0,0,.75)";
+    ctx.shadowBlur = hovered ? 18 : 8;
+    ctx.fillStyle = "rgba(0,0,0,.56)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.46)";
     ctx.lineWidth = hovered ? 2.4 : 1.4;
-    ctx.shadowColor = hovered ? card.color : "transparent";
-    ctx.shadowBlur = hovered ? 16 : 0;
     roundRect(imgBox.x, imgBox.y, imgBox.w, imgBox.h, 18);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
+
     ctx.save();
-    roundRect(imgBox.x + 4, imgBox.y + 4, imgBox.w - 8, imgBox.h - 8, 15);
+    roundRect(imgBox.x + 3, imgBox.y + 3, imgBox.w - 6, imgBox.h - 6, 16);
     ctx.clip();
-    drawImageContain(assets[card.image], imgBox.x + 4, imgBox.y + 4, imgBox.w - 8, imgBox.h - 8);
+    drawImageCover(assets[card.image], imgBox.x + 3, imgBox.y + 3, imgBox.w - 6, imgBox.h - 6);
+    if (hovered) {
+      const grad = ctx.createLinearGradient(imgBox.x, imgBox.y, imgBox.x + imgBox.w, imgBox.y + imgBox.h);
+      grad.addColorStop(0, "rgba(255,255,255,.04)");
+      grad.addColorStop(.48, "rgba(255,255,255,.18)");
+      grad.addColorStop(1, "rgba(255,255,255,.03)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(imgBox.x + 3, imgBox.y + 3, imgBox.w - 6, imgBox.h - 6);
+    }
     ctx.restore();
 
     if (hovered) {
-      ctx.save();
-      const shine = ctx.createLinearGradient(x, y, x + w, y + h);
-      shine.addColorStop(0, "rgba(255,255,255,.02)");
-      shine.addColorStop(.5, "rgba(255,255,255,.16)");
-      shine.addColorStop(1, "rgba(255,255,255,.03)");
-      ctx.fillStyle = shine;
-      roundRect(x + 4, y + 4, w - 8, h - 8, 20);
-      ctx.fill();
-      ctx.restore();
       drawSmallVfxAroundRect({ x, y, w, h }, card.color);
+      drawHoverSelectBox({ x, y, w, h, color: card.color }, 0.10);
     }
 
-    const tx = x + 260;
-    const titleSize = card.id === "competitionRank" ? 23 : 25;
-    drawText(card.shortLabel, tx + 105, y + 43, titleSize, card.color, "center", true);
-    drawText(card.label, tx + 105, y + 78, card.id === "competitionRank" ? 15 : 17, "#ffffff", "center", true);
-    drawText(card.desc1, tx + 105, y + 113, 15, "#e9f6ff", "center", true);
-    drawText(card.desc2, tx + 105, y + 139, 15, "#fff0a8", "center", true);
-
+    // 정보 패널은 이미지와 겹치지 않도록 우측에만 표시합니다.
     ctx.save();
-    ctx.fillStyle = hovered ? "rgba(255,255,255,.20)" : "rgba(0,0,0,.46)";
-    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.50)";
-    ctx.lineWidth = hovered ? 2.2 : 1.3;
-    roundRect(tx + 34, y + 158, 142, 30, 15);
+    ctx.fillStyle = hovered ? "rgba(0,0,0,.50)" : "rgba(0,0,0,.36)";
+    ctx.strokeStyle = "rgba(255,255,255,.20)";
+    ctx.lineWidth = 1;
+    roundRect(infoBox.x, infoBox.y, infoBox.w, infoBox.h, 18);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    drawText(card.key, tx + 105, y + 173, card.key.length > 3 ? 13 : 18, "#fff0a8", "center", true);
+
+    const tx = infoBox.x + infoBox.w / 2;
+    drawText(card.shortLabel, tx, infoBox.y + 32 * pop, card.id === "competitionRank" ? 21 : 24, card.color, "center", true);
+    drawText(card.desc1, tx, infoBox.y + 73 * pop, 18, "#ffffff", "center", true);
+    drawText(card.desc2, tx, infoBox.y + 105 * pop, 16, "#fff0a8", "center", true);
+
+    ctx.save();
+    const keyW = card.key.length > 3 ? 152 * pop : 116 * pop;
+    const keyH = 34 * pop;
+    const keyX = tx - keyW / 2;
+    const keyY = infoBox.y + infoBox.h - keyH - 12 * pop;
+    ctx.fillStyle = hovered ? "rgba(255,255,255,.20)" : "rgba(0,0,0,.48)";
+    ctx.strokeStyle = hovered ? card.color : "rgba(255,255,255,.55)";
+    ctx.lineWidth = hovered ? 2.2 : 1.4;
+    roundRect(keyX, keyY, keyW, keyH, keyH / 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    drawText(card.key, tx, infoBox.y + infoBox.h - 29 * pop, card.key.length > 3 ? 13 : 18, "#fff0a8", "center", true);
   }
 
   function drawModeMenuUI() {
@@ -1926,24 +1951,22 @@
     ctx.fillRect(0,0,W,H);
     ctx.restore();
 
-    drawPanel(55, 58, 1085, 602);
-    drawText("동꼽즈 게임 모드", W/2, 98, 42, "#ffffff");
-    drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 138, 24, "#fff0a8");
+    drawPanel(48, 50, 1100, 620);
+    drawText("동꼽즈 게임 모드", W/2, 92, 42, "#ffffff");
+    drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 130, 23, "#fff0a8");
 
     const cards = modeOptionRects();
     for (const card of cards) drawModeCard(card);
 
     const hovered = cards.find(r => inRect(mouse, r));
     if (hovered) {
-      drawHoverSelectBox({ x: hovered.x, y: hovered.y - 8, w: hovered.w, h: hovered.h, color: hovered.color }, 0.10);
       titleClickFlashX = hovered.x + hovered.w / 2;
       titleClickFlashY = hovered.y + hovered.h / 2;
       titleClickFlashColor = hovered.color;
     }
 
-    drawText("마우스로 카드 선택 또는 단축키 입력", W/2, 622, 19, "#bfe8ff");
-    drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 648, 18, "#fff0a8");
-    if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 676, 17, "#ffb0b0");
+    drawText("마우스로 카드 선택 또는 단축키 입력", W/2, 648, 18, "#bfe8ff");
+    if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 678, 16, "#ffb0b0");
   }
 
   function drawIntroScreen() {
