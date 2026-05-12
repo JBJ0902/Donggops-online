@@ -106,13 +106,14 @@
   let bgmVolume = 0.40;
   let sfxVolume = 0.30;
   let bgmMuted = false;
+  let sfxMuted = false;
   let keyConfig = { hit: " ", star: "b", auto: "5" };
   let waitingKeyAction = null;
 
   // Google ID 로그인 + Google Sheets(Apps Script) 연동 설정
   // 1) GOOGLE_CLIENT_ID는 Google Cloud OAuth 클라이언트 ID입니다.
   // 2) APPS_SCRIPT_WEBAPP_URL은 Apps Script를 웹앱으로 배포한 뒤 받은 /exec URL로 교체하세요.
-  //    URL을 교체하기 전에는 Google 로그인은 로컬 프로필로만 동작하고, 랭킹은 기존 localStorage를 사용합니다.
+  //    URL을 교체하기 전에는 로그인은 로컬 프로필로만 동작하고, 랭킹은 기존 localStorage를 사용합니다.
   const GOOGLE_CLIENT_ID = "1005600552830-ffbq5n0nsucf35lrllqkvpel13fth8nd.apps.googleusercontent.com";
   const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwbChog1d2o0y5DOaJEEK-feaUbv0VfBchLfJJoZ2x6Tw_BqOZIzIhAo9Kk7000Qbwz/exec";
   let currentGoogleIdToken = "";
@@ -139,6 +140,8 @@
   let remoteLeaderboardInFlight = false;
   let remoteLeaderboardSyncedAt = 0;
   let finalLeaderboardAutoRefreshAt = 0;
+  let leaderboardNotice = "";
+  let leaderboardNoticeTimer = 0;
 
   const STAR_SKILL_NAME = "별풍 리액션 러시";
   const AUTO_SKILL_NAME = "동꼽 자동사냥";
@@ -287,6 +290,7 @@
       if (typeof saved.bgmVolume === "number") bgmVolume = Math.max(0, Math.min(1, saved.bgmVolume));
       if (typeof saved.sfxVolume === "number") sfxVolume = Math.max(0, Math.min(1, saved.sfxVolume));
       if (typeof saved.bgmMuted === "boolean") bgmMuted = saved.bgmMuted;
+      if (typeof saved.sfxMuted === "boolean") sfxMuted = saved.sfxMuted;
       if (saved.keyConfig) {
         keyConfig.hit = saved.keyConfig.hit || keyConfig.hit;
         keyConfig.star = saved.keyConfig.star || keyConfig.star;
@@ -297,7 +301,7 @@
 
   function saveSettings() {
     try {
-      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, keyConfig }));
+      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, sfxMuted, keyConfig }));
     } catch {}
     queueRemoteSettingsSave();
   }
@@ -355,18 +359,18 @@
 
   function accountProviderLabel(acc=currentAccount()) {
     if (!acc) return "로그인 안됨";
-    return acc.loginType === "google" ? "Google 연동" : "로컬 계정";
+    return acc.loginType === "google" ? "로그인 연동" : "로컬 계정";
   }
 
   function accountSyncLabel() {
     if (!currentAccount()) return "로그인 후 기록 저장";
-    if (remoteApiEnabled() && currentGoogleIdToken) return "Google Sheets 랭킹 동기화";
+    if (remoteApiEnabled() && currentGoogleIdToken) return "외부 경쟁전 랭킹 연동";
     return "이 기기 로컬 기록";
   }
 
   function accountUsefulLabel(acc=currentAccount()) {
     if (!acc) return "게스트";
-    return `${accountProviderLabel(acc)} · 플레이어 코드 ${accountPlayerCode(acc)}`;
+    return accountProviderLabel(acc);
   }
 
   function settingsStorageKey() {
@@ -423,7 +427,7 @@
     } catch (err) {
       if (nowSec() - remoteNoticeCooldown > 5) {
         remoteNoticeCooldown = nowSec();
-        setLoginNotice("Google Sheets 동기화 실패 - 로컬 저장으로 계속 진행");
+        setLoginNotice("랭킹 동기화 실패 - 로컬 저장으로 계속 진행");
       }
       return null;
     }
@@ -434,13 +438,14 @@
     if (typeof settings.bgmVolume === "number") bgmVolume = Math.max(0, Math.min(1, settings.bgmVolume));
     if (typeof settings.sfxVolume === "number") sfxVolume = Math.max(0, Math.min(1, settings.sfxVolume));
     if (typeof settings.bgmMuted === "boolean") bgmMuted = settings.bgmMuted;
+    if (typeof settings.sfxMuted === "boolean") sfxMuted = settings.sfxMuted;
     if (settings.keyConfig) {
       keyConfig.hit = settings.keyConfig.hit || keyConfig.hit;
       keyConfig.star = settings.keyConfig.star || keyConfig.star;
       keyConfig.auto = settings.keyConfig.auto || keyConfig.auto;
     }
     try {
-      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, keyConfig }));
+      localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, sfxMuted, keyConfig }));
     } catch {}
     applyVolumes();
   }
@@ -449,7 +454,7 @@
     if (!remoteApiEnabled() || !currentGoogleIdToken || !currentUserId) return;
     clearTimeout(remoteSettingsTimer);
     remoteSettingsTimer = setTimeout(() => {
-      remotePost("saveSettings", { settings: { bgmVolume, sfxVolume, bgmMuted, keyConfig } });
+      remotePost("saveSettings", { settings: { bgmVolume, sfxVolume, bgmMuted, sfxMuted, keyConfig } });
     }, 700);
   }
 
@@ -475,7 +480,7 @@
     const acc = currentAccount();
     if (!acc) return;
     if (!remoteApiEnabled()) {
-      setLoginNotice(`${acc.nickname} Google 로그인 완료 / Apps Script URL 미설정`);
+      setLoginNotice(`${acc.nickname} 로그인 완료 / Apps Script URL 미설정`);
       return;
     }
     const loginData = await remotePost("login", {
@@ -494,7 +499,7 @@
     const settingsData = await remotePost("getSettings", {});
     if (settingsData && settingsData.settings) applyRemoteSettings(settingsData.settings);
     await refreshRemoteLeaderboard(true);
-    setLoginNotice(`${currentNickname()} Google 로그인 / Sheets 동기화 완료`);
+    setLoginNotice(`${currentNickname()} 로그인 완료 / 랭킹 연동 완료`);
   }
 
   function buildGoogleLoginPanel() {
@@ -504,11 +509,11 @@
     wrap.className = "google-login-overlay hidden";
     wrap.innerHTML = `
       <div class="google-login-card" role="dialog" aria-modal="true" aria-labelledby="googleLoginTitle">
-        <h3 id="googleLoginTitle">동꼽즈 Google 로그인</h3>
-        <p>Google ID로 로그인하면 닉네임, 키 설정, 사용자 경쟁전 기록을 저장할 수 있습니다.</p>
+        <h3 id="googleLoginTitle">동꼽즈 로그인</h3>
+        <p>로그인하면 닉네임, 키 설정, 사용자 경쟁전 기록을 저장할 수 있습니다.</p>
         <div id="googleLoginStatus" class="google-login-status hidden"></div>
         <div id="googleSignInButton" style="display:grid; place-items:center; min-height:44px;"></div>
-        <button id="googleLoginClose" class="google-login-close" type="button" aria-label="Google 로그인 창 닫기">닫기</button>
+        <button id="googleLoginClose" class="google-login-close" type="button" aria-label="로그인 창 닫기">닫기</button>
       </div>`;
     document.body.appendChild(wrap);
 
@@ -561,20 +566,20 @@
     setGoogleLoginStatus("");
 
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
-      setGoogleLoginStatus("Google Client ID가 아직 설정되지 않았습니다.");
-      setLoginNotice("Google Client ID가 아직 설정되지 않았습니다");
+      setGoogleLoginStatus("로그인 설정이 아직 완료되지 않았습니다.");
+      setLoginNotice("로그인 설정이 아직 완료되지 않았습니다");
       return;
     }
 
     if (!isGoogleLoginAllowedOrigin()) {
-      setGoogleLoginStatus("로컬 파일(file://)에서는 Google 로그인이 차단됩니다. GitHub 도메인에서 접속하거나 LOCAL_TEST_START.bat로 localhost 테스트를 실행하세요.");
-      setLoginNotice("Google 로그인은 GitHub 도메인 또는 localhost에서 테스트하세요");
+      setGoogleLoginStatus("로컬 파일(file://)에서는 로그인이 차단됩니다. GitHub 도메인에서 접속하거나 LOCAL_TEST_START.bat로 localhost 테스트를 실행하세요.");
+      setLoginNotice("로그인은 GitHub 도메인 또는 localhost에서 테스트하세요");
       return;
     }
 
     if (!window.google || !google.accounts || !google.accounts.id) {
-      setGoogleLoginStatus("Google 로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요.");
-      setLoginNotice("Google 로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요");
+      setGoogleLoginStatus("로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요.");
+      setLoginNotice("로그인 모듈 로딩 중입니다. 잠시 후 다시 눌러주세요");
       return;
     }
 
@@ -600,8 +605,8 @@
         locale: "ko"
       });
     } catch (err) {
-      console.warn("Google login render failed", err);
-      setGoogleLoginStatus("Google 로그인 버튼 초기화에 실패했습니다. 도메인 등록과 HTTPS 설정을 확인하세요.");
+      console.warn("Login render failed", err);
+      setGoogleLoginStatus("로그인 버튼 초기화에 실패했습니다. 도메인 등록과 HTTPS 설정을 확인하세요.");
     }
   }
 
@@ -618,7 +623,7 @@
     const token = response && response.credential ? String(response.credential) : "";
     const payload = decodeJwtPayload(token);
     if (!payload || !payload.sub) {
-      setLoginNotice("Google 로그인 토큰을 읽지 못했습니다");
+      setLoginNotice("로그인 토큰을 읽지 못했습니다");
       return;
     }
     hideGoogleLoginPanel();
@@ -655,7 +660,7 @@
     saveAccounts();
     loadSettings();
     applyVolumes();
-    setLoginNotice(`${localPlayerName} Google 로그인 완료`);
+    setLoginNotice(`${localPlayerName} 로그인 완료`);
     syncGoogleLoginToRemote();
   }
 
@@ -922,14 +927,14 @@
   function applyVolumes() {
     for (const [key, a] of Object.entries(audio)) {
       const isBgm = key.includes("Bgm") || key.startsWith("stage");
-      a.volume = isBgm ? bgmEffectiveVolume() : sfxVolume;
+      a.volume = isBgm ? bgmEffectiveVolume() : (sfxMuted ? 0 : sfxVolume);
     }
     if (currentBgm) currentBgm.volume = bgmEffectiveVolume();
   }
 
   function playSfx(key, volMul=1) {
     const a = audio[key];
-    if (!a || !audioUnlocked) return;
+    if (!a || !audioUnlocked || sfxMuted) return;
     try {
       a.pause();
       a.currentTime = 0;
@@ -1243,27 +1248,28 @@
       return;
     }
 
-    drawText(`BGM 볼륨 ${bgmMuted ? "음소거" : (bgmVolume*100).toFixed(0) + "%"}`, W/2, 245, 28, "#fff");
-    menuButton("bgmDown", 360, 278, 120, 46, "BGM -");
-    menuButton("bgmUp", 800, 278, 120, 46, "BGM +");
-    drawVolumeBar(525, 290, 230, 22, bgmMuted ? 0 : bgmVolume, "#8bdfff", "bgm");
-    menuButton("bgmMute", 540, 328, 200, 44, bgmMuted ? "BGM 음소거 해제" : "BGM 음소거");
+    drawText(`BGM 볼륨 ${bgmMuted ? "음소거" : (bgmVolume*100).toFixed(0) + "%"}`, W/2, 232, 27, "#fff");
+    menuButton("bgmDown", 360, 265, 120, 44, "BGM -");
+    menuButton("bgmUp", 800, 265, 120, 44, "BGM +");
+    drawVolumeBar(525, 277, 230, 22, bgmMuted ? 0 : bgmVolume, "#8bdfff", "bgm");
+    menuButton("bgmMute", 540, 314, 200, 42, bgmMuted ? "BGM 음소거 해제" : "BGM 음소거");
 
-    drawText(`효과음 볼륨 ${(sfxVolume*100).toFixed(0)}%`, W/2, 408, 28, "#fff");
-    menuButton("sfxDown", 360, 441, 120, 46, "효과음 -");
-    menuButton("sfxUp", 800, 441, 120, 46, "효과음 +");
-    drawVolumeBar(525, 453, 230, 22, sfxVolume, "#ff8ee4", "sfx");
+    drawText(`효과음 볼륨 ${sfxMuted ? "음소거" : (sfxVolume*100).toFixed(0) + "%"}`, W/2, 391, 27, "#fff");
+    menuButton("sfxDown", 360, 424, 120, 44, "효과음 -");
+    menuButton("sfxUp", 800, 424, 120, 44, "효과음 +");
+    drawVolumeBar(525, 436, 230, 22, sfxMuted ? 0 : sfxVolume, "#ff8ee4", "sfx");
+    menuButton("sfxMute", 540, 474, 200, 42, sfxMuted ? "효과음 음소거 해제" : "효과음 음소거");
 
-    menuButton("keySettings", 175, 560, 155, 50, "키 설정");
-    menuButton("help", 365, 560, 150, 50, "게임 설명");
-    menuButton("fullscreen", 550, 560, 180, 50, "전체화면(F11)");
-    menuButton("resume", 765, 560, 150, 50, "계속하기");
-    menuButton("title", 950, 560, 155, 50, (gameMode === "online" && connected) ? "온라인 로비" : "초기화면");
+    menuButton("keySettings", 175, 580, 155, 48, "키 설정");
+    menuButton("help", 365, 580, 150, 48, "게임 설명");
+    menuButton("fullscreen", 550, 580, 180, 48, "전체화면(F11)");
+    menuButton("resume", 765, 580, 150, 48, "계속하기");
+    menuButton("title", 950, 580, 155, 48, (gameMode === "online" && connected) ? "온라인 로비" : "초기화면");
   }
 
   function menuVolumeSliderRect(kind) {
-    if (kind === "bgm") return { id: "bgmSlider", kind: "bgm", x: 525, y: 290, w: 230, h: 22, color: "#8bdfff", label: "BGM 볼륨" };
-    return { id: "sfxSlider", kind: "sfx", x: 525, y: 453, w: 230, h: 22, color: "#ff8ee4", label: "효과음 볼륨" };
+    if (kind === "bgm") return { id: "bgmSlider", kind: "bgm", x: 525, y: 277, w: 230, h: 22, color: "#8bdfff", label: "BGM 볼륨" };
+    return { id: "sfxSlider", kind: "sfx", x: 525, y: 436, w: 230, h: 22, color: "#ff8ee4", label: "효과음 볼륨" };
   }
 
   function menuVolumeHitRect(kind) {
@@ -1286,6 +1292,7 @@
       bgmMuted = false;
     } else {
       sfxVolume = value;
+      sfxMuted = false;
     }
     applyVolumes();
     saveSettings();
@@ -1352,12 +1359,12 @@
 
 
   function loginButtonRect() {
-    return { id: "loginMain", x: 1018, y: 28, w: 205, h: 46, color: currentUserId ? "#bfffe0" : "#ffd6ff", label: currentUserId ? `${currentNickname()} 로그인` : "Google 로그인" };
+    return { id: "loginMain", x: 1018, y: 28, w: 205, h: 46, color: currentUserId ? "#bfffe0" : "#ffd6ff", label: currentUserId ? `${currentNickname()}` : "로그인" };
   }
 
   function loginDropdownRect() {
     const r = loginButtonRect();
-    return { id: "loginDrop", x: r.x, y: r.y + r.h + 6, w: r.w, h: currentUserId ? 144 : 62, color: r.color, label: "계정 메뉴" };
+    return { id: "loginDrop", x: r.x, y: r.y + r.h + 6, w: r.w, h: currentUserId ? 104 : 62, color: r.color, label: "계정 메뉴" };
   }
 
   function loginWidgetOpen(p=mouse) {
@@ -1371,11 +1378,10 @@
       return [
         { id:"records", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"내 기록" },
         { id:"logout", x:r.x+14, y:r.y+56, w:r.w-28, h:34, color:"#ffd6ff", label:"로그아웃" },
-        { id:"accountInfo", x:r.x+14, y:r.y+98, w:r.w-28, h:32, color:"#bfffe0", label: accountPlayerCode() },
       ];
     }
     return [
-      { id:"googleLogin", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"Google 로그인" },
+      { id:"googleLogin", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"로그인" },
     ];
   }
 
@@ -1394,7 +1400,7 @@
     roundRect(r.x, r.y, r.w, r.h, 16);
     ctx.fill(); ctx.stroke();
     ctx.restore();
-    drawText(currentUserId ? `👤 ${currentNickname()}` : "Google 로그인", r.x + r.w/2, r.y + r.h/2, currentUserId ? 17 : 18, r.color, "center", true);
+    drawText(currentUserId ? `👤 ${currentNickname()}` : "로그인", r.x + r.w/2, r.y + r.h/2, currentUserId ? 17 : 18, r.color, "center", true);
 
     if (open) {
       const d = loginDropdownRect();
@@ -1457,6 +1463,7 @@
       { id: "single", x: 315, y: 337, w: 650, h: 52, color: "#8bdfff", label: "싱글 플레이 AI 대전" },
       { id: "online", x: 360, y: 395, w: 560, h: 54, color: "#ffd6ff", label: "ONLINE 1:1 대전" },
       { id: "competition", x: 340, y: 454, w: 600, h: 54, color: "#fff0a8", label: "사용자 경쟁전" },
+      { id: "competitionRank", x: 340, y: 512, w: 600, h: 42, color: "#bfffe0", label: "사용자 온라인 경쟁전 순위 보기" },
     ];
   }
 
@@ -1949,7 +1956,10 @@
     if (state === "mode") return modeOptionRects().find(r => inRect(mouse, r)) || null;
     if (state === "result") return inRect(mouse, resultNextRect()) ? resultNextRect() : null;
     if (state === "ending") return inRect(mouse, endingNextRect()) ? endingNextRect() : null;
-    if (state === "final") return inRect(mouse, finalNextRect()) ? finalNextRect() : null;
+    if (state === "final") {
+      if (gameMode === "competition" && inRect(mouse, competitionRefreshRect())) return competitionRefreshRect();
+      return inRect(mouse, finalNextRect()) ? finalNextRect() : null;
+    }
     if (state === "records") return inRect(mouse, recordsBackRect()) ? recordsBackRect() : null;
     if (state === "onlineLobby") {
       const b = onlineLobbyButtons.find(v => !v.disabled && inRect(mouse, v));
@@ -2407,6 +2417,7 @@
         else if (b.id === "setStarKey") waitingKeyAction = "star";
         else if (b.id === "setAutoKey") waitingKeyAction = "auto";
         else if (b.id === "bgmMute") { bgmMuted = !bgmMuted; applyVolumes(); saveSettings(); }
+        else if (b.id === "sfxMute") { sfxMuted = !sfxMuted; applyVolumes(); saveSettings(); if (!sfxMuted) playSfx("coin"); }
         else if (b.id === "title") {
           closeMenu();
           if (gameMode === "online" && connected) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
@@ -2419,8 +2430,8 @@
         }
         else if (b.id === "bgmDown") { bgmVolume = Math.max(0, bgmVolume - 0.05); applyVolumes(); saveSettings(); }
         else if (b.id === "bgmUp") { bgmVolume = Math.min(1, bgmVolume + 0.05); applyVolumes(); saveSettings(); }
-        else if (b.id === "sfxDown") { sfxVolume = Math.max(0, sfxVolume - 0.05); applyVolumes(); saveSettings(); }
-        else if (b.id === "sfxUp") { sfxVolume = Math.min(1, sfxVolume + 0.05); applyVolumes(); saveSettings(); playSfx("coin"); }
+        else if (b.id === "sfxDown") { sfxVolume = Math.max(0, sfxVolume - 0.05); sfxMuted = false; applyVolumes(); saveSettings(); }
+        else if (b.id === "sfxUp") { sfxVolume = Math.min(1, sfxVolume + 0.05); sfxMuted = false; applyVolumes(); saveSettings(); playSfx("coin"); }
         return;
       }
     }
@@ -2472,11 +2483,13 @@
         if (opt.id === "single") startSingle();
         else if (opt.id === "online") openConnectionPanel();
         else if (opt.id === "competition") startCompetition();
+        else if (opt.id === "competitionRank") openCompetitionRankPage();
         return;
       }
     }
     if (state === "result" && inRect(p, resultNextRect())) { proceedResult(); return; }
     if (state === "ending" && inRect(p, endingNextRect())) { proceedEnding(); return; }
+    if (state === "final" && gameMode === "competition" && inRect(p, competitionRefreshRect())) { refreshCompetitionRankNow(); return; }
     if (state === "final" && inRect(p, finalNextRect())) { proceedFinal(); return; }
     if (state === "records" && inRect(p, recordsBackRect())) { setState("title"); return; }
     if (state === "onlineLobby") {
@@ -2986,8 +2999,15 @@
       }
     } else if (gameMode === "competition") {
       if (result.win && stageIndex < 9) startStage(stageIndex + 1);
-      else {
-        commitCompetitionRecord(result.win && stageIndex >= 9);
+      else if (!result.win) {
+        commitCompetitionRecord(false);
+        finalLeaderboardAutoRefreshAt = 0;
+        refreshRemoteLeaderboard(true);
+        result = null;
+        finalStats = [];
+        setState("title");
+      } else {
+        commitCompetitionRecord(true);
         finalLeaderboardAutoRefreshAt = 0;
         setState("final");
         refreshRemoteLeaderboard(true);
@@ -3078,6 +3098,7 @@
       if (e.key === "Enter" || e.key === " ") startSingle();
       if (k === "o") openConnectionPanel();
       if (k === "c") startCompetition();
+      if (k === "r") openCompetitionRankPage();
       return;
     }
     if (state === "playing") {
@@ -3152,6 +3173,7 @@
     if (introFlash > 0) introFlash = Math.max(0, introFlash - dt * 1.9);
     if (titleClickFlash > 0) titleClickFlash = Math.max(0, titleClickFlash - dt);
     if (loginNoticeTimer > 0) loginNoticeTimer = Math.max(0, loginNoticeTimer - dt);
+    if (leaderboardNoticeTimer > 0) leaderboardNoticeTimer = Math.max(0, leaderboardNoticeTimer - dt);
     if (state === "onlineCountdown" && onlineCountdownEnd > 0 && nowSec() >= onlineCountdownEnd) {
       startOnlineMatch();
       return;
@@ -3744,7 +3766,7 @@
       drawText("로그인 후 사용자별 기록을 볼 수 있습니다.", W/2, 250, 28, "#fff");
     } else {
       const totals = acc.totals || {};
-      drawText(`닉네임: ${acc.nickname}   ${accountUsefulLabel(acc)}   ${accountSyncLabel()}`, W/2, 132, 18, "#bfe8ff");
+      drawText(`닉네임: ${acc.nickname}   로그인 상태: ${accountUsefulLabel(acc)}   ${accountSyncLabel()}`, W/2, 132, 18, "#bfe8ff");
       drawPanel(120, 160, 1040, 110);
       const items = [
         ["플레이", totals.plays || 0],
@@ -3796,10 +3818,39 @@
     if (!(state === "final" && gameMode === "competition")) return;
     if (!remoteApiEnabled() || !currentGoogleIdToken) return;
     const t = nowSec();
-    if (!finalLeaderboardAutoRefreshAt || t - finalLeaderboardAutoRefreshAt > 10) {
+    if (!finalLeaderboardAutoRefreshAt) {
       finalLeaderboardAutoRefreshAt = t;
       refreshRemoteLeaderboard(true);
     }
+  }
+
+  function competitionRefreshRect() {
+    return { id: "competitionRefresh", x: 1012, y: 78, w: 145, h: 40, color: "#bfffe0", label: "순위 갱신" };
+  }
+
+  function openCompetitionRankPage() {
+    gameMode = "competition";
+    result = null;
+    finalStats = [];
+    leaderboardScroll = 0;
+    finalLeaderboardAutoRefreshAt = 0;
+    leaderboardNotice = "외부 경쟁전 순위";
+    leaderboardNoticeTimer = 1.6;
+    setState("final");
+    refreshRemoteLeaderboard(true).then(() => {
+      leaderboardNotice = remoteApiEnabled() && currentGoogleIdToken ? "갱신 완료" : "로컬 순위 표시";
+      leaderboardNoticeTimer = 2.2;
+    });
+  }
+
+  function refreshCompetitionRankNow() {
+    finalLeaderboardAutoRefreshAt = nowSec();
+    leaderboardNotice = "외부 경쟁전 순위";
+    leaderboardNoticeTimer = 1.4;
+    refreshRemoteLeaderboard(true).then(() => {
+      leaderboardNotice = remoteApiEnabled() && currentGoogleIdToken ? "갱신 완료" : "로컬 순위 표시";
+      leaderboardNoticeTimer = 2.2;
+    });
   }
 
   function drawCompetitionFinal() {
@@ -3810,25 +3861,41 @@
     drawPanel(72, 42, 1136, 642);
     const board = loadLeaderboard();
     const best = board[0];
-    drawText("사용자 경쟁전 최종 결과", W/2, 82, 38, "#fff0a8");
+    drawText("사용자 경쟁전 순위", W/2, 82, 38, "#fff0a8");
     drawText(`내 기록: ${getLocalName()} / 총점 ${totalRunScore(finalStats)} / 스테이지 ${Math.max(0, ...finalStats.map(r => r.stage || 0))} / 최고CPM ${bestRunCpm(finalStats)} / 최대콤보 ${bestRunCombo(finalStats)}`, W/2, 125, 19, "#bfe8ff");
     if (best) drawText(`현재 1위: ${best.nickname}  ${best.totalScore}점  ${best.reachedStage}스테이지`, W/2, 156, 20, "#ffd6ff");
     const rankSyncText = remoteApiEnabled() && currentGoogleIdToken
-      ? (remoteLeaderboardInFlight ? "외부 경쟁전 랭킹 동기화 중..." : "외부 경쟁전 랭킹: Google Sheets 연동")
+      ? "외부 경쟁전 랭킹 : 연동 완료"
       : "랭킹: 이 브라우저 로컬 기록";
     drawText(rankSyncText, W/2, 178, 15, remoteApiEnabled() && currentGoogleIdToken ? "#bfffe0" : "#ffd6ff");
+    const refreshBtn = competitionRefreshRect();
+    const refreshHover = inRect(mouse, refreshBtn);
+    if (refreshHover) drawHoverSelectBox(refreshBtn, 0.16);
+    ctx.save();
+    ctx.fillStyle = refreshHover ? "rgba(191,255,224,.20)" : "rgba(0,0,0,.42)";
+    ctx.strokeStyle = refreshHover ? "rgba(191,255,224,.95)" : "rgba(255,255,255,.62)";
+    ctx.lineWidth = refreshHover ? 2.6 : 1.5;
+    ctx.shadowColor = refreshHover ? "#bfffe0" : "transparent";
+    ctx.shadowBlur = refreshHover ? 14 : 0;
+    roundRect(refreshBtn.x, refreshBtn.y, refreshBtn.w, refreshBtn.h, 14);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+    drawText("순위 갱신", refreshBtn.x + refreshBtn.w/2, refreshBtn.y + refreshBtn.h/2, 16, "#bfffe0", "center", true);
+    if (leaderboardNoticeTimer > 0 && leaderboardNotice) {
+      drawText(leaderboardNotice, W/2, 198, 16, leaderboardNotice === "갱신 완료" ? "#bfffe0" : "#fff0a8", "center", true);
+    }
 
-    drawPanel(110, 190, 1060, 384);
-    drawText("순위", 155, 214, 17, "#bfe8ff");
-    drawText("닉네임", 300, 214, 17, "#bfe8ff");
-    drawText("캐릭터", 455, 214, 17, "#bfe8ff");
-    drawText("스테이지", 575, 214, 17, "#bfe8ff");
-    drawText("총점", 710, 214, 17, "#bfe8ff");
-    drawText("최고CPM", 855, 214, 17, "#bfe8ff");
-    drawText("최대콤보", 1005, 214, 17, "#bfe8ff");
+    drawPanel(110, 210, 1060, 364);
+    drawText("순위", 155, 234, 17, "#bfe8ff");
+    drawText("닉네임", 300, 234, 17, "#bfe8ff");
+    drawText("캐릭터", 455, 234, 17, "#bfe8ff");
+    drawText("스테이지", 575, 234, 17, "#bfe8ff");
+    drawText("총점", 710, 234, 17, "#bfe8ff");
+    drawText("최고CPM", 855, 234, 17, "#bfe8ff");
+    drawText("최대콤보", 1005, 234, 17, "#bfe8ff");
     const maxStart = Math.max(0, board.length - 10);
     leaderboardScroll = Math.max(0, Math.min(leaderboardScroll, maxStart));
-    let y = 252;
+    let y = 272;
     for (let i = leaderboardScroll; i < Math.min(board.length, leaderboardScroll + 10); i++) {
       const r = board[i];
       const me = currentUserId && r.userId === currentUserId && r.totalScore === totalRunScore(finalStats);
@@ -3926,7 +3993,8 @@
       drawText("ENTER / SPACE : 싱글 플레이 AI 대전", W/2, 370, 31, "#bfe8ff");
       drawText("O : ONLINE 1:1 대전", W/2, 425, 31, "#ffd6ff");
       drawText("C : 사용자 경쟁전", W/2, 482, 31, "#fff0a8");
-      drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 550, 20, "#fff0a8");
+      drawText("R : 사용자 온라인 경쟁전 순위 보기", W/2, 535, 24, "#bfffe0");
+      drawText("우측 하단 MENU 또는 ESC : 볼륨 / 설명 / 일시정지", W/2, 580, 20, "#fff0a8");
       if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 588, 18, "#ffb0b0");
     } else if (state === "connected") {
       drawImageCover(assets.bg,0,0,W,H);
@@ -3980,7 +4048,7 @@
       drawText(`최대 콤보 ${result.combo}`, W/2, 517, 25);
 
       let next = gameMode === "competition"
-        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "경쟁전 랭킹")
+        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "초기 화면")
         : (gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비");
       if (result.autoReturnTitle) {
         drawText(`5스테이지 3회 실패 - ${Math.ceil(result.returnTimer || 3)}초 후 초기화면`, W/2, 585, 23, "#ffb3c7");
