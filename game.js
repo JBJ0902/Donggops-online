@@ -114,7 +114,7 @@
   // 2) APPS_SCRIPT_WEBAPP_URL은 Apps Script를 웹앱으로 배포한 뒤 받은 /exec URL로 교체하세요.
   //    URL을 교체하기 전에는 Google 로그인은 로컬 프로필로만 동작하고, 랭킹은 기존 localStorage를 사용합니다.
   const GOOGLE_CLIENT_ID = "1005600552830-ffbq5n0nsucf35lrllqkvpel13fth8nd.apps.googleusercontent.com";
-  const APPS_SCRIPT_WEBAPP_URL = "YOUR_APPS_SCRIPT_WEBAPP_URL";
+  const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwbChog1d2o0y5DOaJEEK-feaUbv0VfBchLfJJoZ2x6Tw_BqOZIzIhAo9Kk7000Qbwz/exec";
   let currentGoogleIdToken = "";
   let googleProfile = null;
   let googleLoginPanelEl = null;
