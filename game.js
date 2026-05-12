@@ -886,7 +886,7 @@
   }
 
   function floatingBgmVisibleInState() {
-    return !menuOpen && (state === "title" || state === "playing" || state === "stageCountdown" || state === "onlineCountdown");
+    return !menuOpen && (state === "title" || state === "select" || state === "mode" || state === "playing" || state === "stageCountdown" || state === "onlineCountdown");
   }
 
   function floatingBgmOpen(p=mouse) {
