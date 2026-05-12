@@ -136,6 +136,9 @@
   let recordsScroll = 0;
   let competitionSaved = false;
   let competitionLastWarnAt = 0;
+  let remoteLeaderboardInFlight = false;
+  let remoteLeaderboardSyncedAt = 0;
+  let finalLeaderboardAutoRefreshAt = 0;
 
   const STAR_SKILL_NAME = "별풍 리액션 러시";
   const AUTO_SKILL_NAME = "동꼽 자동사냥";
@@ -343,6 +346,29 @@
     return acc ? sanitizePlayerName(acc.nickname || acc.id) : "";
   }
 
+  function accountPlayerCode(acc=currentAccount()) {
+    if (!acc) return "게스트";
+    const src = String(acc.googleSub || acc.id || currentUserId || "guest");
+    const code = simpleHash(src).split(":")[0].slice(-6).toUpperCase();
+    return `${acc.loginType === "google" ? "G" : "P"}-${code}`;
+  }
+
+  function accountProviderLabel(acc=currentAccount()) {
+    if (!acc) return "로그인 안됨";
+    return acc.loginType === "google" ? "Google 연동" : "로컬 계정";
+  }
+
+  function accountSyncLabel() {
+    if (!currentAccount()) return "로그인 후 기록 저장";
+    if (remoteApiEnabled() && currentGoogleIdToken) return "Google Sheets 랭킹 동기화";
+    return "이 기기 로컬 기록";
+  }
+
+  function accountUsefulLabel(acc=currentAccount()) {
+    if (!acc) return "게스트";
+    return `${accountProviderLabel(acc)} · 플레이어 코드 ${accountPlayerCode(acc)}`;
+  }
+
   function settingsStorageKey() {
     return currentUserId ? `donggop_settings_user_${currentUserId}` : "donggop_settings";
   }
@@ -427,10 +453,21 @@
     }, 700);
   }
 
-  async function refreshRemoteLeaderboard() {
+  async function refreshRemoteLeaderboard(force=false) {
     if (!remoteApiEnabled()) return;
-    const data = await remotePost("getLeaderboard", { limit: 100 });
-    if (data && Array.isArray(data.leaderboard)) saveLeaderboard(data.leaderboard);
+    const now = (typeof nowSec === "function") ? nowSec() : 0;
+    if (remoteLeaderboardInFlight) return;
+    if (!force && remoteLeaderboardSyncedAt && now - remoteLeaderboardSyncedAt < 6) return;
+    remoteLeaderboardInFlight = true;
+    try {
+      const data = await remotePost("getLeaderboard", { limit: 100 });
+      if (data && Array.isArray(data.leaderboard)) {
+        saveLeaderboard(data.leaderboard);
+        remoteLeaderboardSyncedAt = (typeof nowSec === "function") ? nowSec() : now;
+      }
+    } finally {
+      remoteLeaderboardInFlight = false;
+    }
   }
 
   async function syncGoogleLoginToRemote() {
@@ -456,7 +493,7 @@
     }
     const settingsData = await remotePost("getSettings", {});
     if (settingsData && settingsData.settings) applyRemoteSettings(settingsData.settings);
-    await refreshRemoteLeaderboard();
+    await refreshRemoteLeaderboard(true);
     setLoginNotice(`${currentNickname()} Google 로그인 / Sheets 동기화 완료`);
   }
 
@@ -735,7 +772,6 @@
 
   function competitionDeficit() {
     if (!(gameMode === "competition" && state === "playing" && local && remote)) return 0;
-    if (stageIndex > 4) return 0;
     return Math.max(0, remote.score - local.score);
   }
 
@@ -746,7 +782,7 @@
     if (t - competitionLastWarnAt > 0.85) {
       competitionLastWarnAt = t;
       playSfx("ready", 0.65);
-      addText(W/2, 188, `삐용! 탈락 위험 ${deficit}점 차이`, "#ff4666", 30, 0.75);
+      addText(W/2, 188, `위험! 탈락 위험 ${deficit}점 차이`, "#ff4666", 30, 0.75);
       for (let i=0; i<18; i++) {
         particles.push({
           x: W/2 + (Math.random()-.5)*620,
@@ -794,8 +830,15 @@
     );
     saveLeaderboard(list);
     if (remoteApiEnabled() && currentGoogleIdToken) {
+      remoteLeaderboardInFlight = true;
       remotePost("saveScore", { score: entry }).then((data) => {
-        if (data && Array.isArray(data.leaderboard)) saveLeaderboard(data.leaderboard);
+        if (data && Array.isArray(data.leaderboard)) {
+          saveLeaderboard(data.leaderboard);
+          remoteLeaderboardSyncedAt = nowSec();
+        }
+      }).finally(() => {
+        remoteLeaderboardInFlight = false;
+        refreshRemoteLeaderboard(true);
       });
     }
     if (currentUserId && accounts[currentUserId]) {
@@ -1328,7 +1371,7 @@
       return [
         { id:"records", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"내 기록" },
         { id:"logout", x:r.x+14, y:r.y+56, w:r.w-28, h:34, color:"#ffd6ff", label:"로그아웃" },
-        { id:"accountInfo", x:r.x+14, y:r.y+98, w:r.w-28, h:32, color:"#bfffe0", label: currentUserId },
+        { id:"accountInfo", x:r.x+14, y:r.y+98, w:r.w-28, h:32, color:"#bfffe0", label: accountPlayerCode() },
       ];
     }
     return [
@@ -2945,7 +2988,9 @@
       if (result.win && stageIndex < 9) startStage(stageIndex + 1);
       else {
         commitCompetitionRecord(result.win && stageIndex >= 9);
+        finalLeaderboardAutoRefreshAt = 0;
         setState("final");
+        refreshRemoteLeaderboard(true);
       }
     } else {
       onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
@@ -3394,7 +3439,7 @@
     ctx.translate(W/2, 160);
     const pulse = 1 + Math.sin(t * 14) * 0.055;
     ctx.scale(pulse, pulse);
-    drawText("⚠ 삐용 삐용! 탈락 위험 ⚠", 0, 0, 34, blink ? "#ff405c" : "#fff0a8", "center", true);
+    drawText("⚠ 위험! 탈락 위험 ⚠", 0, 0, 34, blink ? "#ff405c" : "#fff0a8", "center", true);
     drawText(`AI와 ${deficit}점 차이 · 1000점 차이면 탈락`, 0, 38, 21, "#ffffff", "center", true);
     ctx.restore();
   }
@@ -3699,7 +3744,7 @@
       drawText("로그인 후 사용자별 기록을 볼 수 있습니다.", W/2, 250, 28, "#fff");
     } else {
       const totals = acc.totals || {};
-      drawText(`닉네임: ${acc.nickname}   ID: ${acc.id}`, W/2, 132, 22, "#bfe8ff");
+      drawText(`닉네임: ${acc.nickname}   ${accountUsefulLabel(acc)}   ${accountSyncLabel()}`, W/2, 132, 18, "#bfe8ff");
       drawPanel(120, 160, 1040, 110);
       const items = [
         ["플레이", totals.plays || 0],
@@ -3747,7 +3792,18 @@
     drawText("ESC / CLICK : 뒤로", W/2, br.y + br.h/2, 22, "#bfe8ff", "center", true);
   }
 
+  function ensureCompetitionLeaderboardFresh() {
+    if (!(state === "final" && gameMode === "competition")) return;
+    if (!remoteApiEnabled() || !currentGoogleIdToken) return;
+    const t = nowSec();
+    if (!finalLeaderboardAutoRefreshAt || t - finalLeaderboardAutoRefreshAt > 10) {
+      finalLeaderboardAutoRefreshAt = t;
+      refreshRemoteLeaderboard(true);
+    }
+  }
+
   function drawCompetitionFinal() {
+    ensureCompetitionLeaderboardFresh();
     drawImageCover(assets.bg, 0,0,W,H);
     ctx.fillStyle = "rgba(0,0,0,.74)";
     ctx.fillRect(0,0,W,H);
@@ -3757,8 +3813,12 @@
     drawText("사용자 경쟁전 최종 결과", W/2, 82, 38, "#fff0a8");
     drawText(`내 기록: ${getLocalName()} / 총점 ${totalRunScore(finalStats)} / 스테이지 ${Math.max(0, ...finalStats.map(r => r.stage || 0))} / 최고CPM ${bestRunCpm(finalStats)} / 최대콤보 ${bestRunCombo(finalStats)}`, W/2, 125, 19, "#bfe8ff");
     if (best) drawText(`현재 1위: ${best.nickname}  ${best.totalScore}점  ${best.reachedStage}스테이지`, W/2, 156, 20, "#ffd6ff");
+    const rankSyncText = remoteApiEnabled() && currentGoogleIdToken
+      ? (remoteLeaderboardInFlight ? "외부 경쟁전 랭킹 동기화 중..." : "외부 경쟁전 랭킹: Google Sheets 연동")
+      : "랭킹: 이 브라우저 로컬 기록";
+    drawText(rankSyncText, W/2, 178, 15, remoteApiEnabled() && currentGoogleIdToken ? "#bfffe0" : "#ffd6ff");
 
-    drawPanel(110, 182, 1060, 392);
+    drawPanel(110, 190, 1060, 384);
     drawText("순위", 155, 214, 17, "#bfe8ff");
     drawText("닉네임", 300, 214, 17, "#bfe8ff");
     drawText("캐릭터", 455, 214, 17, "#bfe8ff");
