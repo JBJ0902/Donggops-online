@@ -45,6 +45,10 @@
   const DONGGOP_SUSTAIN = 3.0;
   const DONGGOP_DURATION = 13.0;
   const DONGGOP_CPM = 300;
+  const DONGGOP_RELEASE_STAGE = 7;
+  const DONGGOP_RELEASE_DURATION = 10.0;
+  const DONGGOP_RELEASE_HOLD_CPM = 720;
+  const DONGGOP_RELEASE_CPM_BY_STAGE = { 7: 450, 8: 500, 9: 550, 10: 600 };
   const FEVER_STEP = 50;
   const FEVER_DURATION = 8.0;
   const FEVER_CPM = 180;
@@ -307,6 +311,9 @@
     const nk = normalizeGameKey(e);
     if (!nk) return false;
     if (e.repeat || heldGameplayKeys.has(nk)) {
+      // 7~10스테이지 동꼽 해방 중에는 동꼽 키를 누르고 있는 상태가 의도된 조작입니다.
+      // 브라우저 keydown 반복 이벤트는 점수로 직접 반영하지 않고 update 루프의 제한된 자동연타로만 처리합니다.
+      if (actionName === "hit" && isDonggopReleaseActive(local)) return true;
       if (state === "playing" && local && nowSec() - repeatGuardHintAt > 1.15) {
         repeatGuardHintAt = nowSec();
         const x = local.side === "left" ? 330 : 950;
@@ -821,6 +828,23 @@
     return 5;
   }
 
+  function currentStageNo() {
+    return Number(STAGES[stageIndex]?.no || 1);
+  }
+
+  function isDonggopReleaseStage() {
+    return gameMode === "competition" && currentStageNo() >= DONGGOP_RELEASE_STAGE;
+  }
+
+  function donggopCpmForCurrentStage() {
+    if (!isDonggopReleaseStage()) return DONGGOP_CPM;
+    return DONGGOP_RELEASE_CPM_BY_STAGE[currentStageNo()] || DONGGOP_CPM;
+  }
+
+  function isDonggopReleaseActive(player=local) {
+    return !!(player && player.autoReleaseTimer > 0);
+  }
+
   function competitionDeficit() {
     if (!(gameMode === "competition" && state === "playing" && local && remote)) return 0;
     return Math.max(0, remote.score - local.score);
@@ -1079,6 +1103,9 @@
       remoteCpm: 0,
       remoteManualCpm: 0,
       autoAcc: 0,
+      autoReleaseTimer: 0,
+      autoReleaseAcc: 0,
+      autoReleaseUses: 0,
     };
   }
 
@@ -2900,6 +2927,8 @@
       addText(330, 345, "동전이 빠질 것 같아!", "#fff0a8", 25, 1.0);
     }
     player.donggopBuffs = nextDonggopBuffs.filter(x => x > 0);
+    if (player.autoReleaseTimer > 0) player.autoReleaseTimer = Math.max(0, player.autoReleaseTimer - dt);
+    else player.autoReleaseAcc = 0;
     const overlapBlocked = player.donggopBuffs.length > 0;
 
     if (isLocal) {
@@ -2935,11 +2964,20 @@
 
       if (player.donggopBuffs.length > 0 || player.feverTimer > 0 || player.fUnlocked) {
         const starBonus = player.fUnlocked ? 500 : 0;
-        const bonus = (player.donggopBuffs.length * DONGGOP_CPM + starBonus + (player.feverTimer > 0 ? FEVER_CPM : 0)) / 60;
+        const donggopBonus = player.donggopBuffs.length * donggopCpmForCurrentStage();
+        const bonus = (donggopBonus + starBonus + (player.feverTimer > 0 ? FEVER_CPM : 0)) / 60;
         player.autoAcc = (player.autoAcc || 0) + bonus * dt;
         const count = Math.floor(player.autoAcc);
         player.autoAcc -= count;
-        for (let i=0; i<Math.min(count, 20); i++) hit(player, false, gameMode === "online", "auto", false);
+        for (let i=0; i<Math.min(count, 60); i++) hit(player, false, gameMode === "online", "auto", false);
+      }
+
+      if (player.autoReleaseTimer > 0 && heldGameplayKeys.has(normalizeKeyConfigValue(keyConfig.hit, " "))) {
+        // 동꼽 해방: 7~10스테이지 한정. 사용자가 동꼽 키를 누르고 있을 때만 제한된 자동연타를 보조합니다.
+        player.autoReleaseAcc = (player.autoReleaseAcc || 0) + (DONGGOP_RELEASE_HOLD_CPM / 60) * dt;
+        const releaseHits = Math.floor(player.autoReleaseAcc);
+        player.autoReleaseAcc -= releaseHits;
+        for (let i=0; i<Math.min(releaseHits, 18); i++) hit(player, false, gameMode === "online", "release", false);
       }
     }
 
@@ -3179,19 +3217,19 @@
         setState("ending");
       }
     } else if (gameMode === "competition") {
-      if (result.win && stageIndex < 9) startStage(stageIndex + 1);
-      else if (!result.win) {
-        commitCompetitionRecord(false);
-        finalLeaderboardAutoRefreshAt = 0;
-        refreshRemoteLeaderboard(true);
-        result = null;
-        finalStats = [];
-        setState("title");
+      if (result.win && stageIndex < 9) {
+        startStage(stageIndex + 1);
       } else {
-        commitCompetitionRecord(true);
+        commitCompetitionRecord(!!result.win);
         finalLeaderboardAutoRefreshAt = 0;
+        leaderboardNotice = "외부 경쟁전 순위";
+        leaderboardNoticeTimer = 1.6;
+        result = null;
         setState("final");
-        refreshRemoteLeaderboard(true);
+        refreshRemoteLeaderboard(true).then(() => {
+          leaderboardNotice = remoteApiEnabled() && currentGoogleIdToken ? "갱신 완료" : "로컬 순위 표시";
+          leaderboardNoticeTimer = 2.2;
+        });
       }
     } else {
       onlineReturnLobby(true, "대전이 끝났습니다. 다시 READY를 누르면 새 대전을 시작합니다.");
@@ -3295,10 +3333,28 @@
       } else if (isAutoKey) {
         if (local.fUnlocked) addText(330, 300, `${AUTO_SKILL_NAME}은 ${STAR_SKILL_NAME}과 중복 불가`, "#ffd08a", 25, .9);
         else if (local.donggopItems <= 0) addText(330, 300, `${AUTO_SKILL_NAME} 없음`, "#eee", 25, .8);
-        else {
+        else if (isDonggopReleaseStage()) {
+          const maxItems = maxAutoItemsForCurrentStage();
+          const stageCpm = donggopCpmForCurrentStage();
+          if (local.donggopItems < maxItems) {
+            addText(330, 300, `동꼽 해방은 ${maxItems}개 MAX에서 발동!`, "#fff0a8", 25, .9);
+          } else {
+            const used = maxItems;
+            local.donggopItems = 0;
+            for (let i=0; i<used; i++) local.donggopBuffs.push(DONGGOP_DURATION);
+            local.autoReleaseTimer = DONGGOP_RELEASE_DURATION;
+            local.autoReleaseAcc = 0;
+            local.autoReleaseUses = (local.autoReleaseUses || 0) + 1;
+            fountain(330, 330);
+            addText(330, 300, `동꼽 해방! ${used}개 전부 사용`, "#fff0a8", 34, 1.05);
+            addText(330, 338, `10초 홀드 자동연타 + 13초 x${used}개 × ${stageCpm}CPM`, "#bfffe0", 22, 1.15);
+            playSfx("item", 1.1);
+            sendMsg({ type: "item", item: "donggop_release", count: used });
+          }
+        } else {
           local.donggopItems--;
           local.donggopBuffs.push(DONGGOP_DURATION);
-          addText(330, 300, `${AUTO_SKILL_NAME} 발동! 13초 +300CPM`, "#bfe8ff", 32, 1.0);
+          addText(330, 300, `${AUTO_SKILL_NAME} 발동! 13초 +${DONGGOP_CPM}CPM`, "#bfe8ff", 32, 1.0);
           playSfx("item");
           sendMsg({ type: "item", item: "donggop" });
         }
@@ -3690,12 +3746,17 @@
     if (autoFull) {
       drawHudSignalBox(autoBox.x, autoBox.y, autoBox.w, autoBox.h, "auto", tHud + 0.37);
     }
+    const releaseStage = isDonggopReleaseStage();
+    const releaseActive = isDonggopReleaseActive(local);
     const autoPalette = ["#fff0a8", "#8bdfff", "#ffffff", "#ffd6ff"];
-    const autoColor = autoFull ? autoPalette[Math.floor(tHud * 6) % autoPalette.length] : (local.donggopItems > 0 ? "#ffe5a8" : "#ffffff");
-    drawText(`${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} x${local.donggopItems}/${maxAutoItems}`, autoBox.x + autoBox.w / 2, 611, autoFull ? 16 : 15, autoColor);
-    if (autoFull) {
+    const autoColor = (autoFull || releaseActive) ? autoPalette[Math.floor(tHud * 6) % autoPalette.length] : (local.donggopItems > 0 ? "#ffe5a8" : "#ffffff");
+    const autoLabel = releaseStage
+      ? `${keyLabel(keyConfig.auto)}: 동꼽 해방 x${local.donggopItems}/${maxAutoItems}`
+      : `${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} x${local.donggopItems}/${maxAutoItems}`;
+    drawText(autoLabel, autoBox.x + autoBox.w / 2, 611, (autoFull || releaseActive) ? 16 : 15, autoColor);
+    if (autoFull || releaseActive) {
       drawMiniHudSparkles(autoBox.x, autoBox.y, autoBox.w, autoBox.h, tHud + 0.61, "auto");
-      drawText("READY!", autoBox.x + autoBox.w - 40, autoBox.y - 6, 13, "#bfffe0");
+      drawText(releaseActive ? `${local.autoReleaseTimer.toFixed(1)}s` : "READY!", autoBox.x + autoBox.w - 40, autoBox.y - 6, 13, "#bfffe0");
     }
 
     // 키 안내 영역과 게이지 영역을 구분하는 얇은 라인
@@ -3712,7 +3773,8 @@
     drawText(`별풍리액션텐션 ${local.starSustain.toFixed(1)}/${STAR_SUSTAIN.toFixed(0)}초`, 285, 667, 15, "#bfe8ff", "left");
     drawBar(505, 658, 400, 16, sustainRatio, "#8bdfff", "#bfe8ff");
 
-    const dong = local.donggopBuffs.length ? `${Math.max(...local.donggopBuffs).toFixed(1)}s` : "대기";
+    const dongBase = local.donggopBuffs.length ? `${Math.max(...local.donggopBuffs).toFixed(1)}s · +${local.donggopBuffs.length * donggopCpmForCurrentStage()}CPM` : "대기";
+    const dong = releaseActive ? `해방 ${local.autoReleaseTimer.toFixed(1)}s / 홀드 자동연타` : dongBase;
     const fever = local.feverTimer > 0 ? `${local.feverTimer.toFixed(1)}s` : "대기";
 
     ctx.save();
@@ -3969,31 +4031,51 @@
       });
 
       drawText(`저장된 키 설정: ${keyLabel(keyConfig.hit)} 동꼽 / ${keyLabel(keyConfig.star)} 별풍선 / ${keyLabel(keyConfig.auto)} 자동사냥`, W/2, 300, 20, "#bfffe0");
-      drawPanel(120, 326, 1040, 260);
+      const recordsPanel = { x: 120, y: 326, w: 1040, h: 260 };
+      drawPanel(recordsPanel.x, recordsPanel.y, recordsPanel.w, recordsPanel.h);
       drawText("최근 게임 기록", 170, 354, 20, "#fff0a8", "left", true);
       const recs = Array.isArray(acc.records) ? acc.records : [];
-      const start = Math.max(0, Math.min(recordsScroll, Math.max(0, recs.length - 7)));
-      drawText("날짜", 205, 390, 16, "#bfe8ff");
-      drawText("모드", 365, 390, 16, "#bfe8ff");
-      drawText("스테이지", 515, 390, 16, "#bfe8ff");
-      drawText("결과", 650, 390, 16, "#bfe8ff");
-      drawText("점수", 785, 390, 16, "#bfe8ff");
-      drawText("CPM", 920, 390, 16, "#bfe8ff");
-      drawText("콤보", 1045, 390, 16, "#bfe8ff");
-      let y = 425;
-      for (const r of recs.slice(start, start + 7)) {
+      const visibleRecordRows = 7;
+      const start = Math.max(0, Math.min(recordsScroll, Math.max(0, recs.length - visibleRecordRows)));
+      const headerY = 388;
+      const rowStartY = 418;
+      const rowGap = 24;
+      const rowFont = 14;
+      const col = { date: 205, mode: 365, stage: 515, result: 650, score: 785, cpm: 920, combo: 1045 };
+      drawText("날짜", col.date, headerY, 15, "#bfe8ff");
+      drawText("모드", col.mode, headerY, 15, "#bfe8ff");
+      drawText("스테이지", col.stage, headerY, 15, "#bfe8ff");
+      drawText("결과", col.result, headerY, 15, "#bfe8ff");
+      drawText("점수", col.score, headerY, 15, "#bfe8ff");
+      drawText("CPM", col.cpm, headerY, 15, "#bfe8ff");
+      drawText("콤보", col.combo, headerY, 15, "#bfe8ff");
+
+      // 최근 기록 행은 박스 안쪽으로만 그려지게 클리핑해서 마지막 줄이 박스 밖으로 튀지 않게 처리
+      ctx.save();
+      roundRect(recordsPanel.x + 14, 400, recordsPanel.w - 28, recordsPanel.h - 46, 16);
+      ctx.clip();
+      let y = rowStartY;
+      recs.slice(start, start + visibleRecordRows).forEach((r, idx) => {
         const date = (r.at || "").slice(5, 16).replace("T", " ");
         const modeLabel = r.mode === "competition" ? "경쟁전" : (r.mode === "single" ? "AI" : "기록");
-        drawText(date, 205, y, 15, "#fff", "center", true);
-        drawText(modeLabel, 365, y, 15, "#fff", "center", true);
-        drawText(String(r.stage || "-"), 515, y, 15, "#fff0a8", "center", true);
-        drawText(r.win ? "승리" : "패배", 650, y, 15, r.win ? "#bfffe0" : "#ffb0b0", "center", true);
-        drawText(String(r.score || 0), 785, y, 15, "#fff0a8", "center", true);
-        drawText(String(r.maxCpm || 0), 920, y, 15, "#fff0a8", "center", true);
-        drawText(String(r.combo || 0), 1045, y, 15, "#fff0a8", "center", true);
-        y += 30;
-      }
-      if (recs.length > 7) drawText("마우스 휠로 스크롤", 1040, 354, 15, "#ddd", "center", true);
+        if (idx % 2 === 0) {
+          ctx.save();
+          ctx.fillStyle = "rgba(255,255,255,.045)";
+          roundRect(150, y - 10, 970, 20, 10);
+          ctx.fill();
+          ctx.restore();
+        }
+        drawText(date, col.date, y, rowFont, "#fff", "center", true);
+        drawText(modeLabel, col.mode, y, rowFont, "#fff", "center", true);
+        drawText(String(r.stage || "-"), col.stage, y, rowFont, "#fff0a8", "center", true);
+        drawText(r.win ? "승리" : "패배", col.result, y, rowFont, r.win ? "#bfffe0" : "#ffb0b0", "center", true);
+        drawText(String(r.score || 0), col.score, y, rowFont, "#fff0a8", "center", true);
+        drawText(String(r.maxCpm || 0), col.cpm, y, rowFont, "#fff0a8", "center", true);
+        drawText(String(r.combo || 0), col.combo, y, rowFont, "#fff0a8", "center", true);
+        y += rowGap;
+      });
+      ctx.restore();
+      if (recs.length > visibleRecordRows) drawText("마우스 휠로 스크롤", 1040, 354, 15, "#ddd", "center", true);
     }
     const br = recordsBackRect();
     if (inRect(mouse, br)) drawHoverSelectBox(br, 0.18);
@@ -4224,7 +4306,7 @@
       drawText(`최대 콤보 ${result.combo}`, W/2, 517, 25);
 
       let next = gameMode === "competition"
-        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "초기 화면")
+        ? (result.win && stageIndex < 9 ? "다음 경쟁 스테이지" : "사용자 경쟁전 순위 보기")
         : (gameMode === "single" ? (result.win ? (stageIndex < 4 ? "다음 스테이지" : "엔딩 보기") : "재도전") : "온라인 로비");
       if (result.autoReturnTitle) {
         drawText(`5스테이지 3회 실패 - ${Math.ceil(result.returnTimer || 3)}초 후 초기화면`, W/2, 585, 23, "#ffb3c7");
