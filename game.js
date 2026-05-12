@@ -1,6 +1,20 @@
 (() => {
   "use strict";
 
+  // 전체 게임 화면에서 마우스 우클릭 기본 메뉴를 차단합니다.
+  // 캔버스뿐 아니라 온라인 접속 패널 / 로그인 패널까지 모두 적용됩니다.
+  document.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    return false;
+  }, { capture: true });
+
+  document.addEventListener("auxclick", (e) => {
+    if (e.button === 1 || e.button === 2) {
+      e.preventDefault();
+      return false;
+    }
+  }, { capture: true });
+
   const W = 1280, H = 720;
   const canvas = document.getElementById("gameCanvas");
   const ctx = canvas.getContext("2d");
@@ -257,8 +271,32 @@
     return e.key;
   }
 
+  function normalizeKeyConfigValue(value, fallback) {
+    // Google Sheets/Apps Script를 거치면 숫자 키가 5 같은 number로 돌아오는 경우가 있습니다.
+    // 이 상태에서는 keydown의 "5" 문자열과 strict 비교가 실패해서 자동사냥 키가 먹지 않으므로 항상 문자열로 정규화합니다.
+    if (value === " ") return " ";
+    if (value === undefined || value === null || value === "") return fallback;
+    const v = String(value);
+    return v.length === 1 ? v.toLowerCase() : v;
+  }
+
+  function normalizeKeyConfigObject() {
+    keyConfig.hit = normalizeKeyConfigValue(keyConfig.hit, " ");
+    keyConfig.star = normalizeKeyConfigValue(keyConfig.star, "b");
+    keyConfig.auto = normalizeKeyConfigValue(keyConfig.auto, "5");
+  }
+
+  function resetKeyConfigToDefault(showNotice=true) {
+    keyConfig = { hit: " ", star: "b", auto: "5" };
+    normalizeKeyConfigObject();
+    clearGameplayHeldKeys();
+    waitingKeyAction = null;
+    saveSettings();
+    if (showNotice) addText(W/2, 250, "키 설정을 기본값으로 초기화", "#bfffe0", 24, 1.0);
+  }
+
   function keyMatch(e, key) {
-    return normalizeGameKey(e) === key;
+    return normalizeGameKey(e) === normalizeKeyConfigValue(key, "");
   }
 
   function clearGameplayHeldKeys() {
@@ -296,14 +334,17 @@
       if (typeof saved.bgmMuted === "boolean") bgmMuted = saved.bgmMuted;
       if (typeof saved.sfxMuted === "boolean") sfxMuted = saved.sfxMuted;
       if (saved.keyConfig) {
-        keyConfig.hit = saved.keyConfig.hit || keyConfig.hit;
-        keyConfig.star = saved.keyConfig.star || keyConfig.star;
-        keyConfig.auto = saved.keyConfig.auto || keyConfig.auto;
+        keyConfig.hit = normalizeKeyConfigValue(saved.keyConfig.hit, keyConfig.hit);
+        keyConfig.star = normalizeKeyConfigValue(saved.keyConfig.star, keyConfig.star);
+        keyConfig.auto = normalizeKeyConfigValue(saved.keyConfig.auto, keyConfig.auto);
       }
+      normalizeKeyConfigObject();
     } catch {}
+    normalizeKeyConfigObject();
   }
 
   function saveSettings() {
+    normalizeKeyConfigObject();
     try {
       localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, sfxMuted, keyConfig }));
     } catch {}
@@ -444,10 +485,11 @@
     if (typeof settings.bgmMuted === "boolean") bgmMuted = settings.bgmMuted;
     if (typeof settings.sfxMuted === "boolean") sfxMuted = settings.sfxMuted;
     if (settings.keyConfig) {
-      keyConfig.hit = settings.keyConfig.hit || keyConfig.hit;
-      keyConfig.star = settings.keyConfig.star || keyConfig.star;
-      keyConfig.auto = settings.keyConfig.auto || keyConfig.auto;
+      keyConfig.hit = normalizeKeyConfigValue(settings.keyConfig.hit, keyConfig.hit);
+      keyConfig.star = normalizeKeyConfigValue(settings.keyConfig.star, keyConfig.star);
+      keyConfig.auto = normalizeKeyConfigValue(settings.keyConfig.auto, keyConfig.auto);
     }
+    normalizeKeyConfigObject();
     try {
       localStorage.setItem(settingsStorageKey(), JSON.stringify({ bgmVolume, sfxVolume, bgmMuted, sfxMuted, keyConfig }));
     } catch {}
@@ -1235,18 +1277,19 @@
 
     if (menuTab === "keys") {
       drawText("키 설정 변경", W/2, 225, 32, "#bfe8ff");
-      drawText(waitingKeyAction ? "원하는 새 키를 누르세요. ESC / ENTER는 취소입니다." : "바꿀 항목을 선택하세요.", W/2, 268, 20, "#fff0a8");
+      drawText(waitingKeyAction ? "원하는 새 키를 누르세요. ESC / ENTER는 취소입니다." : "바꿀 항목을 선택하거나 기본값으로 초기화하세요.", W/2, 268, 20, "#fff0a8");
       const keyRows = [
         ["setHitKey", "동꼽 키", keyConfig.hit],
         ["setStarKey", "별풍선 키", keyConfig.star],
         ["setAutoKey", `${AUTO_SKILL_NAME} 키`, keyConfig.auto],
       ];
-      let y = 318;
+      let y = 308;
       for (const [id, label, key] of keyRows) {
         drawText(`${label}: ${keyLabel(key)}`, 470, y+17, 24, "#fff", "center", true);
         menuButton(id, 685, y-10, 210, 50, "변경");
-        y += 72;
+        y += 64;
       }
+      menuButton("resetKeys", 520, 500, 240, 44, "키 설정 초기화", "#27334f");
       menuButton("settings", 450, 560, 180, 50, "설정으로");
       menuButton("resume", 660, 560, 180, 50, "계속하기");
       return;
@@ -2552,6 +2595,7 @@
         else if (b.id === "setHitKey") waitingKeyAction = "hit";
         else if (b.id === "setStarKey") waitingKeyAction = "star";
         else if (b.id === "setAutoKey") waitingKeyAction = "auto";
+        else if (b.id === "resetKeys") resetKeyConfigToDefault(true);
         else if (b.id === "bgmMute") { bgmMuted = !bgmMuted; applyVolumes(); saveSettings(); }
         else if (b.id === "sfxMute") { sfxMuted = !sfxMuted; applyVolumes(); saveSettings(); if (!sfxMuted) playSfx("coin"); }
         else if (b.id === "title") {
@@ -3171,7 +3215,7 @@
     if (waitingKeyAction) {
       const nk = normalizeGameKey(e);
       if (e.key !== "Escape" && e.key !== "Enter" && nk) {
-        const used = Object.entries(keyConfig).find(([name, val]) => val === nk && name !== waitingKeyAction);
+        const used = Object.entries(keyConfig).find(([name, val]) => normalizeKeyConfigValue(val, "") === nk && name !== waitingKeyAction);
         if (used) {
           addText(W/2, 250, `${keyLabel(nk)} 키는 이미 사용 중입니다`, "#ffb3c7", 24, 1.0);
         } else {
@@ -3294,7 +3338,7 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "intro" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).includes(nk)) e.preventDefault();
+    if (state === "intro" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).map(v => normalizeKeyConfigValue(v, "")).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
@@ -3464,17 +3508,22 @@
     ctx.restore();
   }
 
+  function visualNowSec() {
+    return (menuOpen && state === "playing" && pauseStarted > 0) ? pauseStarted : nowSec();
+  }
+
   function frameFor(player) {
     const c = chars[player.char];
+    const vt = visualNowSec();
     if (player.donggopBuffs && player.donggopBuffs.length > 0) {
       const remaining = Math.max(...player.donggopBuffs);
       if (remaining <= 2.0) return c.autoEnd || c.frames[0];
-      return c.autoFrames[Math.floor(nowSec()) % 2] || c.frames[0];
+      return c.autoFrames[Math.floor(vt) % 2] || c.frames[0];
     }
     if (player.actionTimer > 0) {
       const currentCpm = Math.max(cpm(player, true), player.remoteCpm || 0);
       const frameRate = Math.max(8, Math.min(28, currentCpm / 42));
-      const idx = Math.floor(nowSec() * frameRate) % 3;
+      const idx = Math.floor(vt * frameRate) % 3;
       return c.frames[idx];
     }
     return c.frames[0];

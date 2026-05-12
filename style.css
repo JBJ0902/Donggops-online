@@ -1,4 +1,7 @@
 html, body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   margin: 0;
   padding: 0;
   background: #050512;
@@ -17,6 +20,9 @@ html, body {
 }
 
 canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   width: min(100vw, calc(100vh * 16 / 9));
   height: min(100vh, calc(100vw * 9 / 16));
   display: block;
