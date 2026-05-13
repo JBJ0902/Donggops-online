@@ -145,6 +145,11 @@
   let googleIdInitialized = false;
   let remoteSettingsTimer = 0;
   let remoteNoticeCooldown = 0;
+  const ONLINE_HEARTBEAT_MS = 45 * 1000;
+  let onlineUserCount = null;
+  let onlineUserCountUpdatedAt = 0;
+  let onlineUserCountInFlight = false;
+  let onlineHeartbeatTimer = 0;
 
   // GitHub Pages 전용 로컬 계정/기록 저장소
   // 서버 DB 없이 브라우저 localStorage에 저장합니다. 같은 브라우저/기기 안에서 사용자별 설정과 기록을 분리합니다.
@@ -152,6 +157,7 @@
   const SESSION_KEY = "donggop_current_user_v1";
   const LEADERBOARD_KEY = "donggop_competition_leaderboard_v1";
   const PRIVACY_CONSENT_KEY = "donggop_privacy_consent_v1";
+  const NICKNAME_CHANGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
   let accounts = {};
   let currentUserId = "";
   let accountButtons = [];
@@ -475,6 +481,57 @@
     loginNoticeTimer = loginNotice ? 3.2 : 0;
   }
 
+
+  function nicknameChangeStatus(acc=currentAccount()) {
+    if (!acc) return { canChange: false, remainingMs: 0 };
+    const lastRaw = acc.nicknameChangedAt || acc.nickname_changed_at || "";
+    const last = Date.parse(lastRaw);
+    if (!Number.isFinite(last)) return { canChange: true, remainingMs: 0, lastAt: "" };
+    const remainingMs = NICKNAME_CHANGE_COOLDOWN_MS - (Date.now() - last);
+    return {
+      canChange: remainingMs <= 0,
+      remainingMs: Math.max(0, remainingMs),
+      lastAt: new Date(last).toISOString()
+    };
+  }
+
+  function formatNicknameCooldown(ms) {
+    const totalHours = Math.max(1, Math.ceil(Number(ms || 0) / (60 * 60 * 1000)));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    if (days > 0) return hours > 0 ? `${days}일 ${hours}시간` : `${days}일`;
+    return `${totalHours}시간`;
+  }
+
+  function updateLocalLeaderboardNickname(newNick) {
+    const list = loadLeaderboard();
+    let changed = false;
+    for (const row of list) {
+      if (row && row.userId === currentUserId) {
+        row.nickname = newNick;
+        changed = true;
+      }
+    }
+    if (changed) saveLeaderboard(list);
+  }
+
+  async function remotePostStrict(action, payload={}) {
+    if (!remoteApiEnabled()) return null;
+    const body = Object.assign({ action, idToken: currentGoogleIdToken, clientTime: new Date().toISOString() }, payload || {});
+    try {
+      const res = await fetch(APPS_SCRIPT_WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body)
+      });
+      const data = safeJsonParse(await res.text());
+      if (!data || typeof data !== "object") return { ok: false, error: "invalid_response" };
+      return data;
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  }
+
   function remoteApiEnabled() {
     return typeof APPS_SCRIPT_WEBAPP_URL === "string" &&
       APPS_SCRIPT_WEBAPP_URL.startsWith("https://") &&
@@ -525,6 +582,96 @@
       return null;
     }
   }
+
+
+  function onlineCountLabel() {
+    if (!currentUserId) return "-명";
+    if (!remoteApiEnabled() || !currentGoogleIdToken) return "-명";
+    if (onlineUserCount === null || onlineUserCount === undefined) return "확인중";
+    return `${Math.max(0, Number(onlineUserCount) || 0)}명`;
+  }
+
+  async function refreshOnlineCount(force=false) {
+    if (!currentUserId || !remoteApiEnabled() || !currentGoogleIdToken) {
+      onlineUserCount = null;
+      onlineUserCountUpdatedAt = 0;
+      return null;
+    }
+    const now = (typeof nowSec === "function") ? nowSec() : Date.now() / 1000;
+    if (onlineUserCountInFlight) return onlineUserCount;
+    if (!force && onlineUserCountUpdatedAt && now - onlineUserCountUpdatedAt < 12) return onlineUserCount;
+
+    onlineUserCountInFlight = true;
+    try {
+      const data = await remotePostStrict("onlinePing", { nickname: currentNickname() || localPlayerName || "동꼽러" });
+      if (data && data.ok && typeof data.onlineCount !== "undefined") {
+        onlineUserCount = Math.max(0, Number(data.onlineCount) || 0);
+      }
+      return onlineUserCount;
+    } finally {
+      onlineUserCountUpdatedAt = (typeof nowSec === "function") ? nowSec() : Date.now() / 1000;
+      onlineUserCountInFlight = false;
+    }
+  }
+
+  function startOnlineHeartbeat() {
+    if (onlineHeartbeatTimer) {
+      clearInterval(onlineHeartbeatTimer);
+      onlineHeartbeatTimer = 0;
+    }
+    if (!currentUserId || !remoteApiEnabled() || !currentGoogleIdToken) {
+      onlineUserCount = null;
+      onlineUserCountUpdatedAt = 0;
+      return;
+    }
+    refreshOnlineCount(true);
+    onlineHeartbeatTimer = setInterval(() => refreshOnlineCount(false), ONLINE_HEARTBEAT_MS);
+  }
+
+  function stopOnlineHeartbeat(sendLeave=false) {
+    if (onlineHeartbeatTimer) {
+      clearInterval(onlineHeartbeatTimer);
+      onlineHeartbeatTimer = 0;
+    }
+    if (sendLeave && currentUserId && remoteApiEnabled() && currentGoogleIdToken) {
+      remotePostStrict("onlineLeave", {}).then(data => {
+        if (data && typeof data.onlineCount !== "undefined") {
+          onlineUserCount = Math.max(0, Number(data.onlineCount) || 0);
+          onlineUserCountUpdatedAt = (typeof nowSec === "function") ? nowSec() : Date.now() / 1000;
+        }
+      }).catch(() => {});
+    } else {
+      onlineUserCount = null;
+      onlineUserCountUpdatedAt = 0;
+    }
+  }
+
+  function sendOnlineLeaveBeacon() {
+    if (!currentUserId || !remoteApiEnabled() || !currentGoogleIdToken) return;
+    const body = JSON.stringify({
+      action: "onlineLeave",
+      idToken: currentGoogleIdToken,
+      clientTime: new Date().toISOString()
+    });
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+        navigator.sendBeacon(APPS_SCRIPT_WEBAPP_URL, blob);
+      } else {
+        fetch(APPS_SCRIPT_WEBAPP_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body,
+          keepalive: true
+        }).catch(() => {});
+      }
+    } catch {}
+  }
+
+  window.addEventListener("beforeunload", sendOnlineLeaveBeacon);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshOnlineCount(false);
+  });
 
   function applyRemoteSettings(settings) {
     if (!settings || typeof settings !== "object") return;
@@ -582,13 +729,19 @@
     });
     if (loginData && loginData.user && loginData.user.nickname) {
       acc.nickname = sanitizePlayerName(loginData.user.nickname || acc.nickname);
+      if (loginData.user.nickname_changed_at) acc.nicknameChangedAt = loginData.user.nickname_changed_at;
       localPlayerName = acc.nickname;
       saveAccounts();
     }
+    if (loginData && typeof loginData.onlineCount !== "undefined") {
+      onlineUserCount = Math.max(0, Number(loginData.onlineCount) || 0);
+      onlineUserCountUpdatedAt = (typeof nowSec === "function") ? nowSec() : Date.now() / 1000;
+    }
+    startOnlineHeartbeat();
     const settingsData = await remotePost("getSettings", {});
     if (settingsData && settingsData.settings) applyRemoteSettings(settingsData.settings);
     await refreshRemoteLeaderboard(true);
-    setLoginNotice(`${currentNickname()} 로그인 완료 / 랭킹 연동 완료`);
+    setLoginNotice(`${currentNickname()} 로그인 완료 / 현재접속자 ${onlineCountLabel()} / 랭킹 연동 완료`);
   }
 
   function hasPrivacyConsent() {
@@ -626,9 +779,9 @@
         <div class="google-privacy-box" aria-label="개인정보 및 이용 책임 안내">
           <b>개인정보 및 이용 책임 안내</b>
           <ul>
-            <li>Google 로그인은 사용자의 게임 랭킹 기록을 위해 Google 고유 식별값, 닉네임, 게임 기록, 키설정, 볼륨 설정만 저장합니다.</li>
+            <li>Google 로그인은 랭킹 기록과 현재접속자 표시를 위해 Google 고유 식별값, 닉네임, 게임 기록, 접속 상태, 키설정, 볼륨 설정만 저장합니다.</li>
             <li>랭킹 화면에는 닉네임, 캐릭터, 점수, 최고 CPM, 콤보, 도달 스테이지만 표시됩니다.</li>
-            <li>브라우저/이용 기기 오류, 네트워크 문제, 로컬 저장 데이터, 데이터 초기화, 이용자 간 분쟁 등 사이트 이용 시 발생하는 문제에 대해서 개발자는 책임 지지 않습니다.</li>
+            <li>브라우저/기기 오류, 네트워크 문제, 로컬 저장 데이터, 데이터 초기화, 이용자 간 분쟁 등 사이트 이용 중 발생하는 문제에 대해 개발자는 책임 지지 않습니다.</li>
           </ul>
         </div>
 
@@ -786,6 +939,7 @@
         loginType: "google",
         googleSub: payload.sub,
         nickname: nick,
+        nicknameChangedAt: "",
         createdAt: new Date().toISOString(),
         records: [],
         totals: { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 }
@@ -807,6 +961,74 @@
     syncGoogleLoginToRemote();
   }
 
+
+  async function promptChangeNickname() {
+    const acc = currentAccount();
+    if (!acc) {
+      setLoginNotice("로그인 후 닉네임 변경 가능");
+      return;
+    }
+
+    const status = nicknameChangeStatus(acc);
+    if (!status.canChange) {
+      setLoginNotice(`닉네임 변경은 ${formatNicknameCooldown(status.remainingMs)} 후 가능`);
+      return;
+    }
+
+    if (acc.loginType === "google" && remoteApiEnabled() && !currentGoogleIdToken) {
+      setLoginNotice("닉네임 변경은 Google 재로그인 후 가능");
+      showGoogleLoginPanel();
+      return;
+    }
+
+    const currentNick = sanitizePlayerName(acc.nickname || currentNickname() || "동꼽러");
+    const input = window.prompt(
+      "새 닉네임을 입력하세요. 한글 12자 / 영문 18자 이내\n닉네임 변경은 7일에 1번만 가능합니다.",
+      currentNick
+    );
+    if (input === null) return;
+
+    const newNick = sanitizePlayerName(input || currentNick || "동꼽러");
+    if (newNick === currentNick) {
+      setLoginNotice("기존 닉네임과 같습니다");
+      return;
+    }
+
+    const ok = window.confirm(`닉네임을 "${newNick}"(으)로 변경할까요?\n변경 후 7일 동안 다시 변경할 수 없습니다.`);
+    if (!ok) return;
+
+    if (acc.loginType === "google" && remoteApiEnabled() && currentGoogleIdToken) {
+      setLoginNotice("닉네임 변경 동기화 중...");
+      const data = await remotePostStrict("changeNickname", { nickname: newNick });
+      if (data && data.ok && data.user) {
+        acc.nickname = sanitizePlayerName(data.user.nickname || newNick);
+        acc.nicknameChangedAt = data.user.nickname_changed_at || new Date().toISOString();
+        localPlayerName = acc.nickname;
+        if (Array.isArray(data.leaderboard)) saveLeaderboard(data.leaderboard);
+        else updateLocalLeaderboardNickname(acc.nickname);
+        saveAccounts();
+        refreshOnlineCount(true);
+        setLoginNotice(`${acc.nickname} 닉네임 변경 완료`);
+        return;
+      }
+      if (data && data.error === "nickname_change_locked") {
+        if (data.user && data.user.nickname_changed_at) acc.nicknameChangedAt = data.user.nickname_changed_at;
+        saveAccounts();
+        setLoginNotice(`닉네임 변경은 ${formatNicknameCooldown(data.remainingMs || 0)} 후 가능`);
+        return;
+      }
+      setLoginNotice("닉네임 변경 실패 - 잠시 후 다시 시도");
+      return;
+    }
+
+    acc.nickname = newNick;
+    acc.nicknameChangedAt = new Date().toISOString();
+    localPlayerName = newNick;
+    updateLocalLeaderboardNickname(newNick);
+    saveAccounts();
+    setLoginNotice(`${newNick} 닉네임 변경 완료`);
+  }
+
   function promptCreateAccount() {
     const id = window.prompt("계정 ID를 입력하세요. 영문/숫자 4~18자리", "");
     if (id === null) return;
@@ -822,10 +1044,14 @@
       id: uid,
       pwHash: simpleHash(uid + "|" + pw),
       nickname: sanitizePlayerName(nick || uid),
+      nicknameChangedAt: "",
       createdAt: new Date().toISOString(),
       records: [],
       totals: { plays: 0, wins: 0, bestScore: 0, bestCpm: 0, bestCombo: 0, bestStage: 0 }
     };
+    stopOnlineHeartbeat(true);
+    currentGoogleIdToken = "";
+    googleProfile = null;
     currentUserId = uid;
     localPlayerName = accounts[uid].nickname;
     saveAccounts();
@@ -842,6 +1068,9 @@
     const pw = window.prompt("PW를 입력하세요.", "");
     if (pw === null) return;
     if (accounts[uid].pwHash !== simpleHash(uid + "|" + pw)) { setLoginNotice("PW가 맞지 않습니다"); return; }
+    stopOnlineHeartbeat(true);
+    currentGoogleIdToken = "";
+    googleProfile = null;
     currentUserId = uid;
     localPlayerName = sanitizePlayerName(accounts[uid].nickname || uid);
     saveAccounts();
@@ -851,10 +1080,13 @@
   }
 
   function logoutAccount() {
+    stopOnlineHeartbeat(true);
     currentUserId = "";
     currentGoogleIdToken = "";
     googleProfile = null;
     localPlayerName = "";
+    onlineUserCount = null;
+    onlineUserCountUpdatedAt = 0;
     saveAccounts();
     loadSettings();
     applyVolumes();
@@ -1616,7 +1848,7 @@
 
   function loginDropdownRect() {
     const r = loginButtonRect();
-    return { id: "loginDrop", x: r.x, y: r.y + r.h + 6, w: r.w, h: currentUserId ? 104 : 62, color: r.color, label: "계정 메뉴" };
+    return { id: "loginDrop", x: r.x, y: r.y + r.h + 6, w: r.w, h: currentUserId ? 188 : 62, color: r.color, label: "계정 메뉴" };
   }
 
   function loginWidgetOpen(p=mouse) {
@@ -1628,8 +1860,10 @@
     const r = loginDropdownRect();
     if (currentUserId) {
       return [
-        { id:"records", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfe8ff", label:"내 기록" },
-        { id:"logout", x:r.x+14, y:r.y+56, w:r.w-28, h:34, color:"#ffd6ff", label:"로그아웃" },
+        { id:"onlineCount", x:r.x+14, y:r.y+14, w:r.w-28, h:34, color:"#bfffe0", label:`현재접속자 : ${onlineCountLabel()}` },
+        { id:"records", x:r.x+14, y:r.y+56, w:r.w-28, h:34, color:"#bfe8ff", label:"내 기록" },
+        { id:"changeNickname", x:r.x+14, y:r.y+98, w:r.w-28, h:34, color:"#fff0a8", label:"닉네임 변경" },
+        { id:"logout", x:r.x+14, y:r.y+140, w:r.w-28, h:34, color:"#ffd6ff", label:"로그아웃" },
       ];
     }
     return [
@@ -1653,6 +1887,10 @@
     ctx.fill(); ctx.stroke();
     ctx.restore();
     drawText(currentUserId ? `👤 ${currentNickname()}` : "로그인", r.x + r.w/2, r.y + r.h/2, currentUserId ? 17 : 18, r.color, "center", true);
+
+    if (open && currentUserId && remoteApiEnabled() && currentGoogleIdToken) {
+      refreshOnlineCount(false);
+    }
 
     if (open) {
       const d = loginDropdownRect();
@@ -1699,8 +1937,19 @@
     const action = accountActionRects().find(b => inRect(p, b));
     if (!action) return true;
     if (action.id === "googleLogin") showGoogleLoginPanel();
+    else if (action.id === "onlineCount") {
+      if (!remoteApiEnabled() || !currentGoogleIdToken) {
+        setLoginNotice("현재접속자 표시는 Google 연동 로그인 후 가능");
+      } else {
+        setLoginNotice("현재접속자 갱신 중...");
+        refreshOnlineCount(true).then(count => {
+          setLoginNotice(`현재접속자 : ${count === null || count === undefined ? "-" : Math.max(0, Number(count) || 0)}명`);
+        });
+      }
+    }
     else if (action.id === "create") promptCreateAccount();
     else if (action.id === "login") promptLoginAccount();
+    else if (action.id === "changeNickname") promptChangeNickname();
     else if (action.id === "logout") logoutAccount();
     else if (action.id === "records") { recordsScroll = 0; setState("records"); }
     return true;
@@ -4379,6 +4628,8 @@
     } else {
       const totals = acc.totals || {};
       drawText(`닉네임: ${acc.nickname}   로그인 상태: ${accountUsefulLabel(acc)}   ${accountSyncLabel()}`, W/2, 132, 18, "#bfe8ff");
+      const nickStatus = nicknameChangeStatus(acc);
+      drawText(nickStatus.canChange ? "닉네임 변경 가능" : `닉네임 변경 가능까지 ${formatNicknameCooldown(nickStatus.remainingMs)} 남음`, W/2, 154, 15, nickStatus.canChange ? "#bfffe0" : "#fff0a8");
       drawPanel(120, 160, 1040, 110);
       const items = [
         ["플레이", totals.plays || 0],

@@ -66,3 +66,19 @@ const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/....../exec";
 - `competition_scores` -> `competition_scores`
 
 Google Sheets에서 CSV로 다운로드한 뒤 Supabase Table Editor 또는 SQL import로 이전할 수 있습니다.
+
+## 닉네임 변경 제한 안내
+
+- v52부터 로그인 후 계정 메뉴에서 `닉네임 변경`을 사용할 수 있습니다.
+- 닉네임 변경은 7일에 1번만 가능합니다.
+- Apps Script의 `users` 시트에 `nickname_changed_at` 열이 추가됩니다. 기존 시트는 새 Code.gs 배포 후 자동으로 헤더가 보정됩니다.
+- 기존 경쟁전 점수의 닉네임도 변경된 닉네임으로 함께 갱신됩니다.
+
+
+## v53 현재접속자 표시 안내
+
+- 로그인 후 우측 상단 계정 메뉴에 `현재접속자 : X명` 항목이 표시됩니다.
+- 현재접속자는 Google Sheets의 `online_sessions` 시트를 기준으로 계산합니다.
+- 클라이언트는 로그인 후 약 45초마다 접속 상태를 갱신합니다.
+- Apps Script는 최근 2분 이내에 갱신된 `online` 상태의 사용자만 현재접속자로 계산합니다.
+- v53 적용 후에는 `apps_script/Code.gs`를 Apps Script에 다시 붙여넣고 웹 앱을 새 배포해야 서버 카운트가 정상 동작합니다.
