@@ -27,8 +27,8 @@
     { no: 3, name: "3스테이지", duration: 180, rank: "보통", ai: 760 },
     { no: 4, name: "4스테이지", duration: 210, rank: "어려움", ai: 970 },
     { no: 5, name: "5스테이지", duration: 300, rank: "매우 어려움", ai: 1210 },
-    // 사용자 경쟁전 전용 6~10 스테이지. BGM 파일은 추후 stage6~stage10으로 추가 가능하며,
-    // 현재는 stage5 BGM을 안전하게 재사용합니다.
+    // 사용자 경쟁전 전용 6~10 스테이지.
+    // 6스테이지는 전용 BGM(stage6_bgm.mp3)을 사용하고, 7~10스테이지는 전용 파일 추가 전까지 stage5 BGM을 재사용합니다.
     { no: 6, name: "6스테이지", duration: 240, rank: "초고수", ai: 1420 },
     { no: 7, name: "7스테이지", duration: 270, rank: "프로", ai: 1640 },
     { no: 8, name: "8스테이지", duration: 300, rank: "마스터", ai: 1880 },
@@ -110,6 +110,7 @@
     stage3: "assets/audio/stage3_bgm.mp3",
     stage4: "assets/audio/stage4_bgm.mp3",
     stage5: "assets/audio/stage5_bgm.mp3",
+    stage6: "assets/audio/stage6_bgm.mp3",
     endingBgm: "assets/audio/ending_bgm.mp3",
     coin: "assets/audio/coin.mp3",
     item: "assets/audio/item_use.mp3",
@@ -1447,14 +1448,21 @@
     }
   }
 
+  function stageBgmKey(stageNo = stageIndex + 1) {
+    const no = Math.max(1, Math.floor(Number(stageNo) || 1));
+    const exact = `stage${no}`;
+    if (audio[exact]) return exact;
+    return `stage${Math.min(no, 5)}`;
+  }
+
   function switchBgmForState() {
     if (!audioUnlocked) return;
     if (state === "intro") ensureIntroBgmPlaying(false);
     else if (state === "title") playBgm("titleBgm");
     else if (state === "select" || state === "mode" || state === "adminStageSelect" || state === "connected" || state === "onlineLobby") playBgm("selectBgm");
     else if (state === "onlineCountdown") playBgm(onlineBgmKey || "stage1");
-    else if (state === "stageCountdown") playBgm(`stage${Math.min(stageIndex + 1, 5)}`);
-    else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : `stage${Math.min(stageIndex + 1, 5)}`);
+    else if (state === "stageCountdown") playBgm(stageBgmKey());
+    else if (state === "playing") playBgm(gameMode === "online" ? (onlineBgmKey || "stage1") : stageBgmKey());
     else if (state === "ending" || state === "final") playBgm("endingBgm");
     else stopBgm();
   }
