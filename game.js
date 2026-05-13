@@ -49,6 +49,7 @@
   const DONGGOP_RELEASE_DURATION = 10.0;
   const DONGGOP_RELEASE_HOLD_CPM = 720;
   const DONGGOP_RELEASE_CPM_BY_STAGE = { 7: 450, 8: 500, 9: 550, 10: 600 };
+  const STAR_CPM_BY_STAGE = { 7: 800, 8: 1000, 9: 1300, 10: 1600 };
   const FEVER_STEP = 50;
   const FEVER_DURATION = 8.0;
   const FEVER_CPM = 180;
@@ -239,8 +240,10 @@
   let adminStageNotice = "";
   let adminStageNoticeTimer = 0;
 
-  const ONLINE_DURATIONS = [120, 180, 240, 300];
+  const ONLINE_DURATIONS = [60, 120, 180, 240, 300, 360, 420, 480, 540, 600];
   const ONLINE_BGM_OPTIONS = [
+    { key: "introBgm", label: "인트로 음악" },
+    { key: "endingBgm", label: "엔딩 음악" },
     { key: "titleBgm", label: "시작화면 BGM" },
     { key: "selectBgm", label: "캐릭터 선택 BGM" },
     { key: "stage1", label: "스테이지 1 BGM" },
@@ -261,6 +264,7 @@
   let chatEditActive = false;
   let chatInput = "";
   let chatMessages = [];
+  let onlineChatScroll = 0;
 
 
   function keyLabel(key) {
@@ -426,10 +430,12 @@
   function isAdminAccount() {
     const acc = currentAccount();
     if (!acc) return false;
-    const nickname = sanitizePlayerName(acc.nickname || "").toUpperCase();
-    // GitHub Pages 정적 배포 환경이라 서버 차원의 완전한 권한 보안은 아니지만,
-    // 일반 유저 화면에는 노출하지 않는 관리자용 밸런스 테스트 게이트입니다.
-    return ["GM", "ADMIN", "JBJ", "관리자"].includes(nickname);
+    const candidates = [acc.nickname, localPlayerName, currentNickname()]
+      .map(v => String(v || "").trim().toUpperCase())
+      .filter(Boolean);
+    // 관리자 히든 테스트는 GM / ADMIN / JBJ 닉네임만 허용합니다.
+    // 한글 "관리자"는 일반 닉네임으로 취급해 접근을 막습니다.
+    return candidates.some(v => ["GM", "ADMIN", "JBJ"].includes(v));
   }
 
   function setAdminStageNotice(msg) {
@@ -871,6 +877,13 @@
   function donggopCpmForCurrentStage() {
     if (!isDonggopReleaseStage()) return DONGGOP_CPM;
     return DONGGOP_RELEASE_CPM_BY_STAGE[currentStageNo()] || DONGGOP_CPM;
+  }
+
+  function starCpmForCurrentStage() {
+    if (gameMode === "competition" && currentStageNo() >= 7) {
+      return STAR_CPM_BY_STAGE[currentStageNo()] || 500;
+    }
+    return 500;
   }
 
   function isDonggopReleaseActive(player=local) {
@@ -1319,7 +1332,7 @@
         "목표: 제한시간 안에 상대보다 동전을 많이 꼽으면 승리합니다.",
         `${keyLabel(keyConfig.hit)}: 동꼽 / ${keyLabel(keyConfig.star)}: ${STAR_SKILL_NAME} 활성 중 1회 입력 / ${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} 사용`,
         `꾹누르기 자동연타는 무효이며, 순수 키 입력만 연타로 인정됩니다.`,
-        `별풍선: ${keyLabel(keyConfig.hit)} 순수 연타 660CPM 이상을 5초 유지하면 ${STAR_SKILL_NAME} 10초 발동 + 자동 +500CPM`,
+        `별풍선: ${keyLabel(keyConfig.hit)} 순수 연타 660CPM 이상 5초 유지 → 10초 발동, 7~10스테이지 후반 보정 강화`,
         `${AUTO_SKILL_NAME}: 1000CPM 3초 유지 시 획득, 사용하면 13초간 자동 +300CPM`,
         "싱글 AI 대전은 플레이어가 400점 이상 앞서면 AI가 추격 모드로 들어갑니다.",
         "5스테이지는 3회 실패하면 자동으로 초기화면으로 돌아갑니다."
@@ -1630,6 +1643,10 @@
   }
 
   function introNextRect() {
+    if (introIndex >= 5) {
+      // 6번째 인트로는 이미지 하단의 "ENTER : 게임 타이틀" 영역 자체를 클릭 대상으로 사용합니다.
+      return { id: "introTitle", x: 468, y: 646, w: 344, h: 50, color: "#8bdfff", label: "게임 타이틀" };
+    }
     return { id: "introNext", x: 500, y: 518, w: 280, h: 48, color: "#fff0a8", label: "다음" };
   }
 
@@ -1898,21 +1915,27 @@
     const slider = introVolumeSliderRect();
     const volOpen = introVolumeOpen();
 
-    if (inRect(mouse, next)) drawHoverSelectBox(next, 0.18);
+    if (introIndex >= 5) {
+      if (inRect(mouse, next)) {
+        drawHoverSelectBox(next, 0.16);
+        drawSmallVfxAroundRect(next, "#8bdfff");
+      }
+    } else {
+      if (inRect(mouse, next)) drawHoverSelectBox(next, 0.18);
+      // 다음 버튼: 스토리 하단 자막과 겹치지 않도록 화면 중앙 하단 위쪽에 배치
+      ctx.save();
+      ctx.fillStyle = inRect(mouse, next) ? "rgba(255,240,168,.18)" : "rgba(0,0,0,.36)";
+      ctx.strokeStyle = inRect(mouse, next) ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.50)";
+      ctx.lineWidth = inRect(mouse, next) ? 2.8 : 1.6;
+      ctx.shadowColor = inRect(mouse, next) ? "#fff0a8" : "transparent";
+      ctx.shadowBlur = inRect(mouse, next) ? 18 : 0;
+      roundRect(next.x, next.y, next.w, next.h, 18);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      drawText("CLICK : 다음", next.x + next.w/2, next.y + next.h/2, 22, "#fff0a8", "center", true);
+    }
     if (inRect(mouse, skip)) drawHoverSelectBox(skip, 0.18);
-
-    // 다음 버튼: 스토리 하단 자막과 겹치지 않도록 화면 중앙 하단 위쪽에 배치
-    ctx.save();
-    ctx.fillStyle = inRect(mouse, next) ? "rgba(255,240,168,.18)" : "rgba(0,0,0,.36)";
-    ctx.strokeStyle = inRect(mouse, next) ? "rgba(255,240,168,.95)" : "rgba(255,255,255,.50)";
-    ctx.lineWidth = inRect(mouse, next) ? 2.8 : 1.6;
-    ctx.shadowColor = inRect(mouse, next) ? "#fff0a8" : "transparent";
-    ctx.shadowBlur = inRect(mouse, next) ? 18 : 0;
-    roundRect(next.x, next.y, next.w, next.h, 18);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-    drawText("CLICK : 다음", next.x + next.w/2, next.y + next.h/2, 22, "#fff0a8", "center", true);
 
     // SKIP 버튼
     ctx.save();
@@ -2423,8 +2446,17 @@
   }
 
   function onlineBgmLabel() {
-    const item = ONLINE_BGM_OPTIONS.find(o => o.key === onlineBgmKey) || ONLINE_BGM_OPTIONS[2];
+    const item = ONLINE_BGM_OPTIONS.find(o => o.key === onlineBgmKey) || ONLINE_BGM_OPTIONS.find(o => o.key === "stage1") || ONLINE_BGM_OPTIONS[0];
     return item.label;
+  }
+
+  function fitLobbyLabel(text, maxChars=16) {
+    const arr = Array.from(String(text || ""));
+    return arr.length > maxChars ? arr.slice(0, maxChars - 1).join("") + "…" : arr.join("");
+  }
+
+  function onlineChatDisplayRect() {
+    return { x: 172, y: 368, w: 915, h: 96 };
   }
 
   function setOnlineReady(v, broadcast=true) {
@@ -2442,7 +2474,8 @@
     const msg = String(text || "").trim();
     if (!msg) return;
     chatMessages.push({ who, text: Array.from(msg).slice(0, 80).join(""), color });
-    if (chatMessages.length > 8) chatMessages.splice(0, chatMessages.length - 8);
+    if (chatMessages.length > 60) chatMessages.splice(0, chatMessages.length - 60);
+    onlineChatScroll = Math.max(0, chatMessages.length - 4);
   }
 
   function sendChat() {
@@ -2605,7 +2638,8 @@
     drawImageCover(assets.bg, 0,0,W,H);
     ctx.fillStyle = "rgba(0,0,0,.44)"; ctx.fillRect(0,0,W,H);
 
-    // 로비 전체 배치 재정렬: 우측 MENU 버튼 영역을 비워두고, 채팅/입력/옵션이 서로 겹치지 않게 분리
+    // 로비 전체 배치 재정렬: MENU/전체화면/BGM 버튼 영역을 비워두고,
+    // 채팅/입력/옵션이 서로 겹치지 않도록 분리합니다.
     drawPanel(92, 34, 1068, 656);
     drawText("온라인 1:1 대전 로비", W/2, 70, 36, "#fff0a8");
     drawText(role === "host" ? "방장" : "참가자", W/2, 107, 22, role === "host" ? "#bfe8ff" : "#ffd6ff");
@@ -2640,40 +2674,54 @@
     drawText(remote ? remote.name : "상대 접속 대기", 910, 257, 24, "#fff");
     drawText(`상태: ${rReady}`, 910, 300, 20, onlineRemoteReady ? "#b6ffb6" : "#fff0a8");
 
-    // 채팅 영역: 메시지 출력 영역과 입력창 영역을 명확히 분리
-    drawPanel(150, 330, 980, 200);
+    // 채팅 영역: 메시지 출력 영역과 입력창 영역을 완전히 분리하고 휠 스크롤 지원
+    drawPanel(150, 330, 980, 210);
     drawText("로비 채팅", 235, 354, 19, "#bfe8ff", "left");
+    const chatRect = onlineChatDisplayRect();
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.20)";
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 1;
+    roundRect(chatRect.x - 8, chatRect.y - 5, chatRect.w + 16, chatRect.h + 10, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
     ctx.save();
     ctx.beginPath();
-    roundRect(172, 372, 915, 88, 10);
+    roundRect(chatRect.x, chatRect.y, chatRect.w, chatRect.h, 10);
     ctx.clip();
-    let cy = 388;
-    for (const m of chatMessages.slice(-4)) {
+    const visibleChatRows = 4;
+    const maxChatStart = Math.max(0, chatMessages.length - visibleChatRows);
+    onlineChatScroll = Math.max(0, Math.min(onlineChatScroll, maxChatStart));
+    let cy = chatRect.y + 17;
+    for (let i = onlineChatScroll; i < Math.min(chatMessages.length, onlineChatScroll + visibleChatRows); i++) {
+      const m = chatMessages[i];
       const line = `${m.who}: ${m.text}`;
-      drawText(line.length > 52 ? line.slice(0, 51) + "…" : line, 180, cy, 16, m.color || "#fff", "left", true);
+      drawText(line.length > 56 ? line.slice(0, 55) + "…" : line, chatRect.x + 8, cy, 16, m.color || "#fff", "left", true);
       cy += 23;
     }
     ctx.restore();
-    drawInputBox("chatInput", 180, 474, 775, 40, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
-    lobbyButton("sendChat", 970, 474, 120, 40, "전송", "#5a2ac6");
+    if (chatMessages.length > visibleChatRows) drawText("휠 스크롤", 1048, 354, 14, "#ddd", "center", true);
 
-    lobbyButton("ready", 185, 558, 180, 52, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
-    lobbyButton("lobbyBack", 395, 558, 160, 52, "나가기", "#3b3b4f");
+    drawInputBox("chatInput", 180, 487, 775, 40, chatInput, chatEditActive, "메시지 입력 후 ENTER 또는 전송");
+    lobbyButton("sendChat", 970, 487, 120, 40, "전송", "#5a2ac6");
 
-    // 상태 안내문은 BGM 선택 박스와 겹치지 않도록 하단 좌측에 고정
-    if (onlineNotice) {
-      const notice2 = onlineNotice.length > 38 ? onlineNotice.slice(0, 37) + "…" : onlineNotice;
-      drawText(notice2, 370, 648, 15, "#fff0a8", "center", true);
-    }
+    lobbyButton("ready", 185, 566, 180, 52, onlineLocalReady ? "준비 취소" : "READY", onlineLocalReady ? "#5a5a5a" : "#bd3ee8");
+    lobbyButton("lobbyBack", 395, 566, 160, 52, "나가기", "#3b3b4f");
 
-    drawPanel(620, 548, 510, 128);
-    if (role !== "host") drawText("시간과 BGM은 방장만 변경할 수 있습니다.", 875, 566, 14, "#d8d8e8");
-    drawText(`플레이 시간: ${Math.round(onlineDuration/60)}분`, 765, 594, 18, "#fff");
-    lobbyButton("durPrev", 875, 574, 48, 36, "◀", "#2d225e", role !== "host");
-    lobbyButton("durNext", 929, 574, 48, 36, "▶", "#2d225e", role !== "host");
-    drawText(`BGM: ${onlineBgmLabel()}`, 640, 646, 16, "#fff0a8", "left");
-    lobbyButton("bgmPrev", 875, 626, 48, 36, "◀", "#2d225e", role !== "host");
-    lobbyButton("bgmNext", 929, 626, 48, 36, "▶", "#2d225e", role !== "host");
+    drawPanel(620, 548, 510, 134);
+    drawText("방 옵션", 875, 570, 16, "#bfe8ff", "center", true);
+    if (role !== "host") drawText("방장만 변경 가능", 1030, 570, 13, "#d8d8e8", "center", true);
+    drawText("플레이 시간", 692, 606, 17, "#fff", "left", true);
+    drawText(`${Math.round(onlineDuration/60)}분`, 845, 606, 20, "#fff0a8", "center", true);
+    lobbyButton("durPrev", 975, 588, 48, 36, "◀", "#2d225e", role !== "host");
+    lobbyButton("durNext", 1030, 588, 48, 36, "▶", "#2d225e", role !== "host");
+
+    drawText("BGM", 692, 650, 17, "#fff0a8", "left", true);
+    drawText(fitLobbyLabel(onlineBgmLabel(), 15), 845, 650, 18, "#fff0a8", "center", true);
+    lobbyButton("bgmPrev", 975, 632, 48, 36, "◀", "#2d225e", role !== "host");
+    lobbyButton("bgmNext", 1030, 632, 48, 36, "▶", "#2d225e", role !== "host");
   }
 
   function drawOnlineCountdown() {
@@ -3079,7 +3127,7 @@
         player.starEarned++;
         player.starPopup = 2.0;
         fountain(330, 330);
-        addText(330, 230, `${STAR_SKILL_NAME}! 10초 +500CPM`, "#ffd6ff", 32, 1.2);
+        addText(330, 230, `${STAR_SKILL_NAME}! 10초 +${starCpmForCurrentStage()}CPM`, "#ffd6ff", 32, 1.2);
         playSfx("starActivate", 1.15);
         sendMsg({ type: "item", item: "star" });
       }
@@ -3100,7 +3148,7 @@
       }
 
       if (player.donggopBuffs.length > 0 || player.feverTimer > 0 || player.fUnlocked) {
-        const starBonus = player.fUnlocked ? 500 : 0;
+        const starBonus = player.fUnlocked ? starCpmForCurrentStage() : 0;
         const donggopBonus = player.donggopBuffs.length * donggopCpmForCurrentStage();
         const bonus = (donggopBonus + starBonus + (player.feverTimer > 0 ? FEVER_CPM : 0)) / 60;
         player.autoAcc = (player.autoAcc || 0) + bonus * dt;
@@ -3537,6 +3585,10 @@
       const board = loadLeaderboard();
       leaderboardScroll = Math.max(0, Math.min(Math.max(0, board.length - 10), leaderboardScroll + (e.deltaY > 0 ? 1 : -1)));
       e.preventDefault();
+    } else if (state === "onlineLobby" && inRect(mouse, { x: 160, y: 360, w: 960, h: 120 })) {
+      const visibleChatRows = 4;
+      onlineChatScroll = Math.max(0, Math.min(Math.max(0, chatMessages.length - visibleChatRows), onlineChatScroll + (e.deltaY > 0 ? 1 : -1)));
+      e.preventDefault();
     } else if (state === "records") {
       const acc = currentAccount();
       const len = acc && Array.isArray(acc.records) ? acc.records.length : 0;
@@ -3876,7 +3928,7 @@
     const maxAutoItems = maxAutoItemsForCurrentStage();
     const autoFull = local.donggopItems >= maxAutoItems;
     const bStatus = starActive
-      ? `${STAR_SKILL_NAME}(${keyLabel(keyConfig.star)}키) ${local.fTimer.toFixed(1)}s`
+      ? `${STAR_SKILL_NAME} +${starCpmForCurrentStage()}CPM ${local.fTimer.toFixed(1)}s`
       : local.fCooldown > 0
         ? `별풍선 안터짐(${keyLabel(keyConfig.star)}쿨 ${local.fCooldown.toFixed(1)}s)`
         : `별풍선 안터짐(${keyLabel(keyConfig.star)}잠김)`;
