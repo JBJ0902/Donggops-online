@@ -151,6 +151,7 @@
   const ACCOUNT_STORE_KEY = "donggop_accounts_v1";
   const SESSION_KEY = "donggop_current_user_v1";
   const LEADERBOARD_KEY = "donggop_competition_leaderboard_v1";
+  const PRIVACY_CONSENT_KEY = "donggop_privacy_consent_v1";
   let accounts = {};
   let currentUserId = "";
   let accountButtons = [];
@@ -577,12 +578,7 @@
       return;
     }
     const loginData = await remotePost("login", {
-      nickname: acc.nickname,
-      profile: {
-        email: acc.googleEmail || "",
-        name: acc.googleName || acc.nickname || "",
-        picture: acc.googlePicture || ""
-      }
+      nickname: acc.nickname
     });
     if (loginData && loginData.user && loginData.user.nickname) {
       acc.nickname = sanitizePlayerName(loginData.user.nickname || acc.nickname);
@@ -595,6 +591,28 @@
     setLoginNotice(`${currentNickname()} 로그인 완료 / 랭킹 연동 완료`);
   }
 
+  function hasPrivacyConsent() {
+    try { return localStorage.getItem(PRIVACY_CONSENT_KEY) === "yes"; } catch { return false; }
+  }
+
+  function savePrivacyConsent(checked) {
+    try {
+      if (checked) localStorage.setItem(PRIVACY_CONSENT_KEY, "yes");
+      else localStorage.removeItem(PRIVACY_CONSENT_KEY);
+    } catch {}
+  }
+
+  function updateGoogleLoginButtonLock() {
+    const panel = googleLoginPanelEl;
+    if (!panel) return;
+    const consent = panel.querySelector("#googlePrivacyConsent");
+    const signIn = panel.querySelector("#googleSignInButton");
+    const guide = panel.querySelector("#googleConsentGuide");
+    const ok = !!(consent && consent.checked);
+    if (signIn) signIn.classList.toggle("google-signin-disabled", !ok);
+    if (guide) guide.textContent = ok ? "동의 확인 완료: Google 로그인 버튼을 누를 수 있습니다." : "동의 체크 후 Google 로그인 버튼이 활성화됩니다.";
+  }
+
   function buildGoogleLoginPanel() {
     if (googleLoginPanelEl) return googleLoginPanelEl;
     const wrap = document.createElement("div");
@@ -603,9 +621,27 @@
     wrap.innerHTML = `
       <div class="google-login-card" role="dialog" aria-modal="true" aria-labelledby="googleLoginTitle">
         <h3 id="googleLoginTitle">동꼽즈 로그인</h3>
-        <p>로그인하면 닉네임, 키 설정, 사용자 경쟁전 기록을 저장할 수 있습니다.</p>
+        <p>무료 팬 게임 이용을 위한 로그인입니다. 아래 개인정보 및 이용 책임 안내를 확인해 주세요.</p>
+
+        <div class="google-privacy-box" aria-label="개인정보 및 이용 책임 안내">
+          <b>개인정보 및 이용 책임 안내</b>
+          <ul>
+            <li>운영자는 전화번호, 주소, 결제정보를 요구하거나 저장하지 않습니다.</li>
+            <li>Google 로그인은 본인 확인용으로만 사용하며, 랭킹·기록 구분을 위해 Google 고유 식별값, 닉네임, 게임 기록, 키/볼륨 설정만 저장합니다.</li>
+            <li>랭킹 화면에는 닉네임, 캐릭터, 점수, 최고 CPM, 콤보, 도달 스테이지만 표시됩니다.</li>
+            <li>브라우저/기기 오류, 네트워크 문제, 로컬 저장 데이터 초기화, 이용자 간 분쟁은 이용자 책임으로 이용해 주세요.</li>
+            <li>단, 운영자의 고의 또는 중대한 과실에 따른 책임은 제외하지 않습니다.</li>
+          </ul>
+        </div>
+
+        <label class="google-consent-check">
+          <input id="googlePrivacyConsent" type="checkbox" />
+          <span>위 개인정보 안내 및 무료 팬 게임 이용 조건을 확인하고 동의합니다.</span>
+        </label>
+        <div id="googleConsentGuide" class="google-consent-guide">동의 체크 후 Google 로그인 버튼이 활성화됩니다.</div>
+
         <div id="googleLoginStatus" class="google-login-status hidden"></div>
-        <div id="googleSignInButton" style="display:grid; place-items:center; min-height:44px;"></div>
+        <div id="googleSignInButton" class="google-signin-disabled" style="display:grid; place-items:center; min-height:44px;"></div>
         <button id="googleLoginClose" class="google-login-close" type="button" aria-label="로그인 창 닫기">닫기</button>
       </div>`;
     document.body.appendChild(wrap);
@@ -626,6 +662,15 @@
     closeBtn.addEventListener("pointerdown", forceClose, true);
     closeBtn.addEventListener("click", forceClose, true);
     closeBtn.onclick = forceClose;
+
+    const consent = wrap.querySelector("#googlePrivacyConsent");
+    if (consent) {
+      consent.checked = hasPrivacyConsent();
+      consent.addEventListener("change", () => {
+        savePrivacyConsent(consent.checked);
+        updateGoogleLoginButtonLock();
+      });
+    }
 
     googleLoginPanelEl = wrap;
     return googleLoginPanelEl;
@@ -656,6 +701,9 @@
   function showGoogleLoginPanel() {
     const panel = buildGoogleLoginPanel();
     panel.classList.remove("hidden");
+    const consent = panel.querySelector("#googlePrivacyConsent");
+    if (consent) consent.checked = hasPrivacyConsent();
+    updateGoogleLoginButtonLock();
     setGoogleLoginStatus("");
 
     if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("YOUR_")) {
@@ -697,6 +745,7 @@
         text: "signin_with",
         locale: "ko"
       });
+      updateGoogleLoginButtonLock();
     } catch (err) {
       console.warn("Login render failed", err);
       setGoogleLoginStatus("로그인 버튼 초기화에 실패했습니다. 도메인 등록과 HTTPS 설정을 확인하세요.");
@@ -713,6 +762,12 @@
   }, true);
 
   function handleGoogleCredentialResponse(response) {
+    if (!hasPrivacyConsent()) {
+      showGoogleLoginPanel();
+      setGoogleLoginStatus("개인정보 안내 및 이용 조건 동의가 필요합니다.");
+      setLoginNotice("동의 체크 후 로그인해 주세요");
+      return;
+    }
     const token = response && response.credential ? String(response.credential) : "";
     const payload = decodeJwtPayload(token);
     if (!payload || !payload.sub) {
@@ -725,16 +780,13 @@
     const uid = `google:${payload.sub}`;
     let acc = accounts[uid];
     if (!acc) {
-      const suggested = sanitizePlayerName(payload.name || (payload.email ? payload.email.split("@")[0] : "동꼽러"));
+      const suggested = "동꼽러";
       const nickInput = window.prompt("동꼽즈에서 사용할 닉네임을 입력하세요. 한글 12자 / 영문 18자 이내", suggested);
       const nick = sanitizePlayerName(nickInput || suggested || "동꼽러");
       acc = accounts[uid] = {
         id: uid,
         loginType: "google",
         googleSub: payload.sub,
-        googleEmail: payload.email || "",
-        googleName: payload.name || "",
-        googlePicture: payload.picture || "",
         nickname: nick,
         createdAt: new Date().toISOString(),
         records: [],
@@ -743,13 +795,13 @@
     } else {
       acc.loginType = "google";
       acc.googleSub = payload.sub;
-      acc.googleEmail = payload.email || acc.googleEmail || "";
-      acc.googleName = payload.name || acc.googleName || "";
-      acc.googlePicture = payload.picture || acc.googlePicture || "";
+      delete acc.googleEmail;
+      delete acc.googleName;
+      delete acc.googlePicture;
       acc.lastLoginAt = new Date().toISOString();
     }
     currentUserId = uid;
-    localPlayerName = sanitizePlayerName(acc.nickname || acc.googleName || "동꼽러");
+    localPlayerName = sanitizePlayerName(acc.nickname || "동꼽러");
     saveAccounts();
     loadSettings();
     applyVolumes();
@@ -1665,22 +1717,22 @@
     // 텍스트는 우측 정보 영역 안에서만 배치합니다.
     return [
       {
-        id: "single", x: 88, y: 148, w: 500, h: 226, color: "#65b5ff", image: "modeSingle",
+        id: "single", x: 88, y: 162, w: 500, h: 214, color: "#65b5ff", image: "modeSingle",
         label: "싱글 플레이 AI 대전", shortLabel: "AI 대전", key: "ENTER / SPACE",
         desc1: "1~5 스테이지", desc2: "혼자 즐기는 기본 모드"
       },
       {
-        id: "online", x: 630, y: 148, w: 500, h: 226, color: "#ff7ad6", image: "modeOnline",
+        id: "online", x: 630, y: 162, w: 500, h: 214, color: "#ff7ad6", image: "modeOnline",
         label: "ONLINE 1:1 대전", shortLabel: "온라인 매치", key: "O",
         desc1: "1:1 로비 대전", desc2: "채팅 · READY"
       },
       {
-        id: "competition", x: 88, y: 396, w: 500, h: 226, color: "#fff0a8", image: "modeCompetition",
+        id: "competition", x: 88, y: 402, w: 500, h: 214, color: "#fff0a8", image: "modeCompetition",
         label: "사용자 경쟁전", shortLabel: "경쟁전", key: "C",
         desc1: "1~10 스테이지", desc2: "랭킹 기록 저장"
       },
       {
-        id: "competitionRank", x: 630, y: 396, w: 500, h: 226, color: "#bfffe0", image: "modeRank",
+        id: "competitionRank", x: 630, y: 402, w: 500, h: 214, color: "#bfffe0", image: "modeRank",
         label: "사용자 온라인 경쟁전 순위 보기", shortLabel: "순위 보기", key: "R",
         desc1: "외부 경쟁전 순위", desc2: "1위~100위 확인"
       },
@@ -2171,6 +2223,46 @@
     drawText(card.key, tx, infoBox.y + infoBox.h - 29 * pop, card.key.length > 3 ? 13 : 18, "#fff0a8", "center", true);
   }
 
+
+  function drawModeHeaderBadge() {
+    const t = nowSec();
+    const titleY = 82;
+    ctx.save();
+    ctx.shadowColor = '#b48cff';
+    ctx.shadowBlur = 18 + Math.sin(t * 3) * 4;
+    drawText('동꼽즈 게임 모드', W/2, titleY, 43, '#ffffff', 'center', true);
+    ctx.restore();
+
+    const name = chars[selectedChar].name;
+    const pillW = Math.max(360, 238 + name.length * 28);
+    const pillH = 38;
+    const pillX = W/2 - pillW/2;
+    const pillY = 112;
+    const grad = ctx.createLinearGradient(pillX, pillY, pillX + pillW, pillY);
+    grad.addColorStop(0, 'rgba(90,180,255,.20)');
+    grad.addColorStop(.5, 'rgba(255,255,255,.10)');
+    grad.addColorStop(1, 'rgba(255,110,215,.22)');
+    ctx.save();
+    ctx.shadowColor = selectedChar === 0 ? '#63b8ff' : '#ff7ad6';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = 'rgba(255,255,255,.48)';
+    ctx.lineWidth = 1.6;
+    roundRect(pillX, pillY, pillW, pillH, 19);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    drawText('선택 캐릭터', W/2 - 46, pillY + pillH/2, 19, '#fff0a8', 'right', true);
+    drawText('·', W/2 - 30, pillY + pillH/2, 20, 'rgba(255,255,255,.9)', 'center', true);
+    const charColor = selectedChar === 0 ? '#86d9ff' : '#ff9add';
+    ctx.save();
+    ctx.shadowColor = charColor;
+    ctx.shadowBlur = 12;
+    drawText(name, W/2 - 13, pillY + pillH/2, 24, charColor, 'left', true);
+    ctx.restore();
+  }
+
   function drawModeMenuUI() {
     drawImageCover(assets.bg,0,0,W,H);
     ctx.save();
@@ -2179,8 +2271,7 @@
     ctx.restore();
 
     drawPanel(48, 50, 1100, 620);
-    drawText("동꼽즈 게임 모드", W/2, 92, 42, "#ffffff");
-    drawText(`선택 캐릭터: ${chars[selectedChar].name}`, W/2, 130, 23, "#fff0a8");
+    drawModeHeaderBadge();
 
     const cards = modeOptionRects();
     for (const card of cards) drawModeCard(card);
@@ -2192,7 +2283,7 @@
       titleClickFlashColor = hovered.color;
     }
 
-    drawText("마우스로 카드 선택 또는 단축키 입력", W/2, 648, 18, "#bfe8ff");
+    drawText("마우스로 카드 선택 또는 단축키 입력", W/2, 646, 18, "#bfe8ff");
     if (loginNoticeTimer > 0 && loginNotice) drawText(loginNotice, W/2, 678, 16, "#ffb0b0");
   }
 

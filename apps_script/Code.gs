@@ -13,7 +13,9 @@ const SHEETS = {
 };
 
 const HEADERS = {
-  users: ['user_id', 'google_email', 'google_name', 'nickname', 'picture', 'created_at', 'last_login_at'],
+  // 개인정보 최소화를 위해 이메일/실명/프로필 사진은 저장하지 않습니다.
+  // 기존 Google Sheets 배포본과의 호환성을 위해 7개 열 구조는 유지하되, 미사용 열은 항상 빈 값으로 기록합니다.
+  users: ['user_id', 'google_email_unused', 'google_name_unused', 'nickname', 'picture_unused', 'created_at', 'last_login_at'],
   user_settings: ['user_id', 'key_hit', 'key_star', 'key_auto', 'bgm_volume', 'sfx_volume', 'bgm_muted', 'sfx_muted', 'updated_at'],
   competition_scores: ['score_id', 'user_id', 'nickname', 'character', 'reached_stage', 'total_score', 'best_cpm', 'best_combo', 'play_time', 'created_at']
 };
@@ -41,8 +43,8 @@ function doPost(e) {
     const userId = 'google:' + verified.sub;
 
     if (action === 'login') {
-      const nickname = sanitizeNickname_(body.nickname || verified.name || verified.email.split('@')[0] || '동꼽러');
-      const user = upsertUser_(userId, verified.email, verified.name, nickname, verified.picture || '');
+      const nickname = sanitizeNickname_(body.nickname || '동꼽러');
+      const user = upsertUser_(userId, nickname);
       return json_({ ok: true, user, leaderboard: getLeaderboard_(100) });
     }
 
@@ -123,18 +125,19 @@ function findRowByFirstCol_(sh, value) {
   return -1;
 }
 
-function upsertUser_(userId, email, name, nickname, picture) {
+function upsertUser_(userId, nickname) {
   const sh = getSheet_(SHEETS.USERS);
   const now = new Date().toISOString();
   const row = findRowByFirstCol_(sh, userId);
   if (row > 0) {
     const old = sh.getRange(row, 1, 1, HEADERS.users.length).getValues()[0];
     const finalNickname = nickname || old[3] || '동꼽러';
-    sh.getRange(row, 1, 1, HEADERS.users.length).setValues([[userId, email, name, finalNickname, picture, old[5] || now, now]]);
-    return { user_id: userId, email, name, nickname: finalNickname, picture };
+    // email/name/picture 열은 기존 시트 호환용 빈 칸입니다. 로그인할 때마다 해당 칸을 비워 개인정보 저장을 최소화합니다.
+    sh.getRange(row, 1, 1, HEADERS.users.length).setValues([[userId, '', '', finalNickname, '', old[5] || now, now]]);
+    return { user_id: userId, nickname: finalNickname };
   }
-  sh.appendRow([userId, email, name, nickname, picture, now, now]);
-  return { user_id: userId, email, name, nickname, picture };
+  sh.appendRow([userId, '', '', nickname, '', now, now]);
+  return { user_id: userId, nickname };
 }
 
 function getSettings_(userId) {

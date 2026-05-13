@@ -53,6 +53,12 @@ const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/....../exec";
 - 사용자 경쟁전 최종 결과는 Google Sheets의 `competition_scores`에 저장되고 1~100위 랭킹으로 표시됩니다.
 - Apps Script URL을 아직 넣지 않은 상태에서는 기존처럼 브라우저 로컬 저장만 작동합니다.
 
+## 개인정보 최소화 안내
+- v49부터 Google 로그인 시 이메일, 실명, 프로필 사진은 Google Sheets에 저장하지 않습니다.
+- `users` 시트의 `google_email_unused`, `google_name_unused`, `picture_unused` 열은 기존 배포본과의 호환성을 위한 빈 칸입니다.
+- 랭킹과 기록 구분에는 Google 고유 식별값, 닉네임, 게임 기록, 키/볼륨 설정만 사용합니다.
+- 로그인 팝업에서 개인정보 및 이용 책임 안내에 동의해야 Google 로그인 버튼이 활성화됩니다.
+
 ## 6. 나중에 Supabase로 이전
 각 시트가 Supabase 테이블로 옮기기 쉬운 형태입니다.
 - `users` -> `users`
