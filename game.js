@@ -237,6 +237,7 @@
   let stageCountdownStart = 0;
   let stageCountdownEnd = 0;
   let adminTestMode = false;
+  let adminReleaseTestMode = false;
   let adminStageNotice = "";
   let adminStageNoticeTimer = 0;
 
@@ -443,18 +444,19 @@
     adminStageNoticeTimer = adminStageNotice ? 2.8 : 0;
   }
 
-  function openAdminStageSelect() {
+  function openAdminStageSelect(releaseTest=false) {
     if (!isAdminAccount()) {
       setLoginNotice("관리자 계정만 접근 가능");
       playSfx("coin", .55);
       return;
     }
     adminTestMode = true;
+    adminReleaseTestMode = !!releaseTest;
     result = null;
     finalStats = [];
     leaderboardScroll = 0;
     closePeer();
-    setAdminStageNotice("관리자 밸런스 테스트 모드");
+    setAdminStageNotice(adminReleaseTestMode ? "관리자 동꼽 해방 테스트 모드" : "관리자 밸런스 테스트 모드");
     setState("adminStageSelect");
   }
 
@@ -890,6 +892,83 @@
     return !!(player && player.autoReleaseTimer > 0);
   }
 
+  function resetDonggopReleaseCycle(player=local) {
+    if (!player) return;
+    player.donggopReleaseCycleActive = false;
+    player.donggopReleaseCycleTarget = 0;
+    player.donggopReleaseCycleSpent = 0;
+  }
+
+  function grantAdminReleaseTestCoins(player=local, force=false) {
+    if (!(adminTestMode && adminReleaseTestMode && isDonggopReleaseStage() && player)) return;
+    const maxItems = maxAutoItemsForCurrentStage();
+    if (currentStageNo() < 7 || maxItems < 7) return;
+    if (isDonggopReleaseActive(player) || player.donggopReleaseCycleActive) return;
+    if (force || player.donggopItems < maxItems) {
+      player.donggopItems = maxItems;
+      player.adminReleaseRefillNotified = true;
+      addText(330, 300, `테스트 코인 자동 충전 x${maxItems}/${maxItems}`, "#bfffe0", 25, .9);
+    }
+  }
+
+  function triggerDonggopRelease(player=local, usedCount=0) {
+    if (!player) return;
+    player.autoReleaseTimer = DONGGOP_RELEASE_DURATION;
+    player.autoReleaseAcc = 0;
+    player.autoReleaseUses = (player.autoReleaseUses || 0) + 1;
+    resetDonggopReleaseCycle(player);
+    fountain(330, 330);
+    addText(330, 300, `동꼽 해방! ${usedCount || maxAutoItemsForCurrentStage()}개 전부 사용`, "#fff0a8", 34, 1.05);
+    addText(330, 338, `10초 동안 ${keyLabel(keyConfig.hit)} 홀드 자동연타`, "#bfffe0", 24, 1.15);
+    playSfx("item", 1.1);
+    sendMsg({ type: "item", item: "donggop_release", count: usedCount || maxAutoItemsForCurrentStage() });
+  }
+
+  function useDonggopAutoSkill(player=local) {
+    if (!player) return;
+    if (player.fUnlocked) {
+      addText(330, 300, `${AUTO_SKILL_NAME}은 ${STAR_SKILL_NAME}과 중복 불가`, "#ffd08a", 25, .9);
+      return;
+    }
+    if (player.donggopItems <= 0) {
+      addText(330, 300, `${AUTO_SKILL_NAME} 없음`, "#eee", 25, .8);
+      return;
+    }
+
+    const releaseStage = isDonggopReleaseStage();
+    const maxItems = maxAutoItemsForCurrentStage();
+    const beforeItems = player.donggopItems;
+    const stageCpm = donggopCpmForCurrentStage();
+
+    if (releaseStage && beforeItems >= maxItems && !player.donggopReleaseCycleActive) {
+      player.donggopReleaseCycleActive = true;
+      player.donggopReleaseCycleTarget = maxItems;
+      player.donggopReleaseCycleSpent = 0;
+      addText(330, 268, `동꼽 해방 준비! ${maxItems}개를 모두 사용하세요`, "#fff0a8", 23, .9);
+    }
+
+    player.donggopItems = Math.max(0, player.donggopItems - 1);
+    player.donggopBuffs.push(DONGGOP_DURATION);
+
+    if (releaseStage && player.donggopReleaseCycleActive) {
+      player.donggopReleaseCycleSpent++;
+      const left = Math.max(0, player.donggopReleaseCycleTarget - player.donggopReleaseCycleSpent);
+      addText(330, 305, `${AUTO_SKILL_NAME} 1개 사용! 13초 +${stageCpm}CPM`, "#bfe8ff", 28, 1.0);
+      if (left > 0) addText(330, 338, `해방까지 ${left}개 남음`, "#fff0a8", 22, .9);
+      if (player.donggopItems <= 0 && player.donggopReleaseCycleSpent >= player.donggopReleaseCycleTarget) {
+        triggerDonggopRelease(player, player.donggopReleaseCycleTarget);
+      } else {
+        playSfx("item");
+        sendMsg({ type: "item", item: "donggop", count: 1 });
+      }
+    } else {
+      addText(330, 300, `${AUTO_SKILL_NAME} 발동! 13초 +${releaseStage ? stageCpm : DONGGOP_CPM}CPM`, "#bfe8ff", 32, 1.0);
+      if (releaseStage) addText(330, 338, `MAX에서 전부 쓰면 동꼽 해방`, "#fff0a8", 21, .85);
+      playSfx("item");
+      sendMsg({ type: "item", item: "donggop", count: 1 });
+    }
+  }
+
   function competitionDeficit() {
     if (!(gameMode === "competition" && state === "playing" && local && remote)) return 0;
     return Math.max(0, remote.score - local.score);
@@ -1151,6 +1230,10 @@
       autoReleaseTimer: 0,
       autoReleaseAcc: 0,
       autoReleaseUses: 0,
+      donggopReleaseCycleActive: false,
+      donggopReleaseCycleTarget: 0,
+      donggopReleaseCycleSpent: 0,
+      adminReleaseRefillNotified: false,
     };
   }
 
@@ -2121,8 +2204,8 @@
     ctx.restore();
 
     drawPanel(70, 58, 1140, 604);
-    drawText("관리자 밸런스 테스트", W/2, 105, 42, "#fff0a8");
-    drawText("1~10스테이지를 바로 시작합니다 · 기록/랭킹 저장 없음", W/2, 145, 21, "#bfe8ff");
+    drawText(adminReleaseTestMode ? "관리자 동꼽 해방 테스트" : "관리자 밸런스 테스트", W/2, 105, 42, "#fff0a8");
+    drawText(adminReleaseTestMode ? "7~10스테이지 시작 시 MAX 코인 자동 충전 · 기록/랭킹 저장 없음" : "1~10스테이지를 바로 시작합니다 · 기록/랭킹 저장 없음", W/2, 145, 21, "#bfe8ff");
     drawText(`테스트 캐릭터: ${chars[selectedChar].name} / AI: ${chars[1-selectedChar].name}`, W/2, 171, 18, "#ffffff");
 
     for (const r of adminStageRects()) {
@@ -2166,7 +2249,7 @@
     ctx.restore();
     drawText("ESC / CLICK : 모드 선택으로", br.x + br.w/2, br.y + br.h/2, 22, "#bfe8ff", "center", true);
 
-    drawText("키보드: 1~9, 0=10스테이지 바로 시작", W/2, 570, 18, "#ffffff", "center", true);
+    drawText(adminReleaseTestMode ? "키보드: 7~9, 0=10스테이지 권장 · 동꼽 자동사냥 MAX 자동 지급" : "키보드: 1~9, 0=10스테이지 바로 시작", W/2, 570, 18, "#ffffff", "center", true);
     if (adminStageNoticeTimer > 0 && adminStageNotice) drawText(adminStageNotice, W/2, 680, 18, "#fff0a8", "center", true);
   }
 
@@ -2857,7 +2940,7 @@
     if (state === "adminStageSelect") {
       const stageBtn = adminStageRects().find(r => inRect(p, r));
       if (stageBtn) { startAdminStage(stageBtn.stage); return; }
-      if (inRect(p, adminStageBackRect())) { adminTestMode = false; setState("mode"); return; }
+      if (inRect(p, adminStageBackRect())) { adminTestMode = false; adminReleaseTestMode = false; setState("mode"); return; }
     }
     if (state === "result" && inRect(p, resultNextRect())) { proceedResult(); return; }
     if (state === "ending" && inRect(p, endingNextRect())) { proceedEnding(); return; }
@@ -2952,6 +3035,7 @@
 
   function startSingle() {
     adminTestMode = false;
+    adminReleaseTestMode = false;
     gameMode = "single";
     stage5FailCount = 0;
     competitionSaved = false;
@@ -2964,6 +3048,7 @@
 
   function startCompetition() {
     adminTestMode = false;
+    adminReleaseTestMode = false;
     if (!currentUserId) {
       setLoginNotice("사용자 경쟁전은 로그인 후 이용 가능");
       return;
@@ -3009,6 +3094,11 @@
     if (!remote) remote = defaultPlayer(1-selectedChar, "right");
     local = resetPlayerKeepChar(local, "left");
     remote = resetPlayerKeepChar(remote, "right");
+    if (adminTestMode && adminReleaseTestMode && gameMode === "competition" && (STAGES[idx]?.no || 1) >= 7) {
+      // 관리자 동꼽 해방 테스트: 7~10스테이지 시작 시 MAX 코인을 즉시 지급합니다.
+      local.donggopItems = Math.max(7, maxAutoItemsForCurrentStage());
+      local.adminReleaseRefillNotified = true;
+    }
     particles = [];
     floating = [];
     aiAcc = 0;
@@ -3114,6 +3204,10 @@
     player.donggopBuffs = nextDonggopBuffs.filter(x => x > 0);
     if (player.autoReleaseTimer > 0) player.autoReleaseTimer = Math.max(0, player.autoReleaseTimer - dt);
     else player.autoReleaseAcc = 0;
+    if (isLocal && player.autoReleaseTimer <= 0 && player.donggopItems <= 0 && !player.donggopReleaseCycleActive) {
+      player.autoReleaseAcc = 0;
+    }
+    if (isLocal) grantAdminReleaseTestCoins(player, false);
     const overlapBlocked = player.donggopBuffs.length > 0;
 
     if (isLocal) {
@@ -3461,7 +3555,7 @@
     unlockAudio();
     const k = e.key.toLowerCase();
     if (e.key === "Escape") {
-      if (state === "adminStageSelect") { adminTestMode = false; setState("mode"); }
+      if (state === "adminStageSelect") { adminTestMode = false; adminReleaseTestMode = false; setState("mode"); }
       else if (state === "playing" && gameMode === "online" && !menuOpen) onlineReturnLobby(true, "온라인 로비로 돌아왔습니다.");
       else if (menuOpen) closeMenu();
       else openMenu();
@@ -3508,7 +3602,8 @@
       return;
     }
     if (state === "mode") {
-      if (e.ctrlKey && e.shiftKey && k === "t") { openAdminStageSelect(); return; }
+      if (e.ctrlKey && e.shiftKey && e.key === "Tab") { openAdminStageSelect(true); return; }
+      if (e.ctrlKey && e.shiftKey && k === "t") { openAdminStageSelect(false); return; }
       if (e.key === "Enter" || e.key === " ") { playSfx("select", 1.05); startSingle(); }
       if (k === "o") { playSfx("select", 1.05); openConnectionPanel(); }
       if (k === "c") { playSfx("select", 1.05); startCompetition(); }
@@ -3516,7 +3611,7 @@
       return;
     }
     if (state === "adminStageSelect") {
-      if (e.key === "Escape") { adminTestMode = false; setState("mode"); return; }
+      if (e.key === "Escape") { adminTestMode = false; adminReleaseTestMode = false; setState("mode"); return; }
       if (/^[1-9]$/.test(e.key)) { startAdminStage(Number(e.key)); return; }
       if (e.key === "0") { startAdminStage(10); return; }
       return;
@@ -3532,33 +3627,7 @@
       } else if (isStarKey && !local.fUnlocked) {
         addText(330, 255, local.fCooldown > 0 ? `${keyLabel(keyConfig.star)} 쿨타임 ${local.fCooldown.toFixed(1)}s` : `${keyLabel(keyConfig.star)} 키 잠김`, "#ffc88a", 26, .8);
       } else if (isAutoKey) {
-        if (local.fUnlocked) addText(330, 300, `${AUTO_SKILL_NAME}은 ${STAR_SKILL_NAME}과 중복 불가`, "#ffd08a", 25, .9);
-        else if (local.donggopItems <= 0) addText(330, 300, `${AUTO_SKILL_NAME} 없음`, "#eee", 25, .8);
-        else if (isDonggopReleaseStage()) {
-          const maxItems = maxAutoItemsForCurrentStage();
-          const stageCpm = donggopCpmForCurrentStage();
-          if (local.donggopItems < maxItems) {
-            addText(330, 300, `동꼽 해방은 ${maxItems}개 MAX에서 발동!`, "#fff0a8", 25, .9);
-          } else {
-            const used = maxItems;
-            local.donggopItems = 0;
-            for (let i=0; i<used; i++) local.donggopBuffs.push(DONGGOP_DURATION);
-            local.autoReleaseTimer = DONGGOP_RELEASE_DURATION;
-            local.autoReleaseAcc = 0;
-            local.autoReleaseUses = (local.autoReleaseUses || 0) + 1;
-            fountain(330, 330);
-            addText(330, 300, `동꼽 해방! ${used}개 전부 사용`, "#fff0a8", 34, 1.05);
-            addText(330, 338, `10초 홀드 자동연타 + 13초 x${used}개 × ${stageCpm}CPM`, "#bfffe0", 22, 1.15);
-            playSfx("item", 1.1);
-            sendMsg({ type: "item", item: "donggop_release", count: used });
-          }
-        } else {
-          local.donggopItems--;
-          local.donggopBuffs.push(DONGGOP_DURATION);
-          addText(330, 300, `${AUTO_SKILL_NAME} 발동! 13초 +${DONGGOP_CPM}CPM`, "#bfe8ff", 32, 1.0);
-          playSfx("item");
-          sendMsg({ type: "item", item: "donggop" });
-        }
+        useDonggopAutoSkill(local);
       }
       return;
     }
@@ -3599,7 +3668,7 @@
 
   window.addEventListener("keydown", (e) => {
     const nk = normalizeGameKey(e);
-    if (state === "intro" || state === "adminStageSelect" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).map(v => normalizeKeyConfigValue(v, "")).includes(nk)) e.preventDefault();
+    if ((state === "mode" && e.ctrlKey && e.shiftKey && (e.key === "Tab" || String(e.key).toLowerCase() === "t")) || state === "intro" || state === "adminStageSelect" || state === "stageCountdown" || state === "onlineLobby" || state === "ending" || [" ", "ArrowLeft", "ArrowRight"].includes(e.key) || Object.values(keyConfig).map(v => normalizeKeyConfigValue(v, "")).includes(nk)) e.preventDefault();
     handleKey(e);
   });
 
@@ -3980,7 +4049,7 @@
     drawBar(505, 658, 400, 16, sustainRatio, "#8bdfff", "#bfe8ff");
 
     const dongBase = local.donggopBuffs.length ? `${Math.max(...local.donggopBuffs).toFixed(1)}s · +${local.donggopBuffs.length * donggopCpmForCurrentStage()}CPM` : "대기";
-    const dong = releaseActive ? `해방 ${local.autoReleaseTimer.toFixed(1)}s / 홀드 자동연타` : dongBase;
+    const dong = releaseActive ? `해방 ${local.autoReleaseTimer.toFixed(1)}s / ${keyLabel(keyConfig.hit)} 홀드 자동연타` : (local.donggopReleaseCycleActive ? `해방 준비: ${local.donggopReleaseCycleSpent || 0}/${local.donggopReleaseCycleTarget || maxAutoItems} 사용` : dongBase);
     const fever = local.feverTimer > 0 ? `${local.feverTimer.toFixed(1)}s` : "대기";
 
     ctx.save();
