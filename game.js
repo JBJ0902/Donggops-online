@@ -36,8 +36,30 @@
     { no: 10, name: "10스테이지", duration: 300, rank: "동꼽신", ai: 2420 },
   ];
 
-  const STAR_THRESHOLD = 660;
-  const STAR_SUSTAIN = 5.0;
+  const STAR_THRESHOLD = 660; // fallback
+  const STAR_SUSTAIN = 5.0;   // fallback
+  const STAR_SUSTAIN_DECAY_RATE = 0.65;
+  const STAR_BALANCE = {
+    single: [
+      { cpm: 520, sustain: 3.0 },
+      { cpm: 580, sustain: 3.5 },
+      { cpm: 600, sustain: 4.0 },
+      { cpm: 620, sustain: 4.5 },
+      { cpm: 660, sustain: 5.0 },
+    ],
+    competition: [
+      { cpm: 560, sustain: 3.0 },
+      { cpm: 560, sustain: 3.5 },
+      { cpm: 600, sustain: 4.0 },
+      { cpm: 600, sustain: 4.0 },
+      { cpm: 600, sustain: 5.0 },
+      { cpm: 620, sustain: 5.0 },
+      { cpm: 620, sustain: 5.0 },
+      { cpm: 660, sustain: 5.0 },
+      { cpm: 660, sustain: 5.0 },
+      { cpm: 660, sustain: 5.0 },
+    ],
+  };
   const F_UNLOCK = 10.0;
   const F_COOLDOWN = 5.0;
   // D키 기능은 이번 버전에서 제거됨
@@ -1171,6 +1193,13 @@
     return 500;
   }
 
+  function currentStarRequirement() {
+    const modeKey = gameMode === "competition" ? "competition" : "single";
+    const table = STAR_BALANCE[modeKey] || STAR_BALANCE.single;
+    const idx = Math.max(0, Math.min(table.length - 1, currentStageNo() - 1));
+    return table[idx] || { cpm: STAR_THRESHOLD, sustain: STAR_SUSTAIN };
+  }
+
   function isDonggopReleaseActive(player=local) {
     return !!(player && player.autoReleaseTimer > 0);
   }
@@ -1705,7 +1734,7 @@
         "목표: 제한시간 안에 상대보다 동전을 많이 꼽으면 승리합니다.",
         `${keyLabel(keyConfig.hit)}: 동꼽 / ${keyLabel(keyConfig.star)}: ${STAR_SKILL_NAME} 활성 중 1회 입력 / ${keyLabel(keyConfig.auto)}: ${AUTO_SKILL_NAME} 사용`,
         `꾹누르기 자동연타는 무효이며, 순수 키 입력만 연타로 인정됩니다.`,
-        `별풍선: ${keyLabel(keyConfig.hit)} 순수 연타 660CPM 이상 5초 유지 → 10초 발동, 7~10스테이지 후반 보정 강화`,
+        `별풍선: 모드/스테이지별 CPM과 유지시간 충족 → 10초 발동, 조건 미달 시 텐션은 천천히 감소`,
         `${AUTO_SKILL_NAME}: 1000CPM 3초 유지 시 획득, 사용하면 13초간 자동 +300CPM`,
         "싱글 AI 대전은 플레이어가 400점 이상 앞서면 AI가 추격 모드로 들어갑니다.",
         "5스테이지는 3회 실패하면 자동으로 초기화면으로 돌아갑니다."
@@ -3557,10 +3586,16 @@
     const overlapBlocked = player.donggopBuffs.length > 0;
 
     if (isLocal) {
-      if (!player.fUnlocked && player.fCooldown <= 0 && !overlapBlocked && manual >= STAR_THRESHOLD) player.starSustain += dt;
-      else if (!player.fUnlocked) player.starSustain = 0;
+      const starReq = currentStarRequirement();
+      const starReadyCheck = !player.fUnlocked && player.fCooldown <= 0 && !overlapBlocked;
+      if (starReadyCheck && manual >= starReq.cpm) {
+        player.starSustain = Math.min(starReq.sustain, player.starSustain + dt);
+      } else if (!player.fUnlocked) {
+        const decayRate = starReadyCheck ? STAR_SUSTAIN_DECAY_RATE : 1.0;
+        player.starSustain = Math.max(0, player.starSustain - dt * decayRate);
+      }
 
-      if (!player.fUnlocked && player.fCooldown <= 0 && !overlapBlocked && player.starSustain >= STAR_SUSTAIN) {
+      if (starReadyCheck && player.starSustain >= starReq.sustain) {
         player.starSustain = 0;
         player.fUnlocked = true;
         player.fTimer = F_UNLOCK;
@@ -4385,13 +4420,14 @@
     drawHudSectionDivider(245, 628, 790);
 
     const manual = cpm(local, true);
-    const cpmRatio = Math.max(0, Math.min(1, manual / STAR_THRESHOLD));
-    const sustainRatio = Math.max(0, Math.min(1, local.starSustain / STAR_SUSTAIN));
+    const starReq = currentStarRequirement();
+    const cpmRatio = Math.max(0, Math.min(1, manual / starReq.cpm));
+    const sustainRatio = Math.max(0, Math.min(1, local.starSustain / starReq.sustain));
 
-    drawText(`별풍선 ${manual}/${STAR_THRESHOLD} CPM`, 285, 640, 15, "#fff0a8", "left");
+    drawText(`별풍선 ${manual}/${starReq.cpm} CPM`, 285, 640, 15, "#fff0a8", "left");
     drawBar(505, 631, 400, 16, cpmRatio, "#ff8ee4", "#fff0a8");
 
-    drawText(`별풍리액션텐션 ${local.starSustain.toFixed(1)}/${STAR_SUSTAIN.toFixed(0)}초`, 285, 667, 15, "#bfe8ff", "left");
+    drawText(`별풍리액션텐션 ${local.starSustain.toFixed(1)}/${starReq.sustain.toFixed(1)}초`, 285, 667, 15, "#bfe8ff", "left");
     drawBar(505, 658, 400, 16, sustainRatio, "#8bdfff", "#bfe8ff");
 
     const dongBase = local.donggopBuffs.length ? `${Math.max(...local.donggopBuffs).toFixed(1)}s · +${local.donggopBuffs.length * donggopCpmForCurrentStage()}CPM` : "대기";
